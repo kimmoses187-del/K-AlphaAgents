@@ -102,7 +102,7 @@ def fetch_financial_statements(corp_code: str, year: int, reprt_code: str = "110
 
 def format_financial_data(corp_info: dict, fs_current: dict, fs_prev: dict,
                           current_year: int) -> str:
-    """Format DART data into readable text for LLM analysis."""
+    """Format DART data into readable text for LLM analysis. (Legacy — kept for compatibility)"""
     lines = []
 
     lines.append("## Company Information")
@@ -115,26 +115,80 @@ def format_financial_data(corp_info: dict, fs_current: dict, fs_prev: dict,
     lines.append(f"Homepage: {corp_info.get('hm_url', 'N/A')}")
     lines.append("")
 
-    def _format_fs(fs_data: dict, label: str) -> str:
-        if fs_data.get("status") != "000" or not fs_data.get("list"):
-            return f"## Financial Statements ({label})\nData not available.\n"
+    lines.append(_format_single_fs(fs_current, f"FY{current_year}"))
+    lines.append(_format_single_fs(fs_prev, f"FY{current_year - 1}"))
 
-        items = fs_data["list"]
-        section = [f"## Financial Statements ({label})"]
+    return "\n".join(lines)
 
-        for sj_div, sj_label in [("BS", "Balance Sheet"), ("IS", "Income Statement"), ("CF", "Cash Flow")]:
-            group = [i for i in items if i.get("sj_div") == sj_div]
-            if not group:
-                continue
-            section.append(f"\n### {sj_label}")
-            for item in group[:20]:
-                val = item.get("thstrm_amount", "N/A")
-                prev_val = item.get("frmtrm_amount", "N/A")
-                section.append(f"  {item.get('account_nm')}: {val} (prev: {prev_val})")
 
-        return "\n".join(section) + "\n"
+def _format_single_fs(fs_data: dict, label: str) -> str:
+    """Format one DART financial statement response into readable text."""
+    if fs_data.get("status") != "000" or not fs_data.get("list"):
+        return f"## Financial Statements ({label})\nData not available.\n"
 
-    lines.append(_format_fs(fs_current, f"FY{current_year}"))
-    lines.append(_format_fs(fs_prev, f"FY{current_year - 1}"))
+    items = fs_data["list"]
+    section = [f"## Financial Statements ({label})"]
+
+    for sj_div, sj_label in [("BS", "Balance Sheet"), ("IS", "Income Statement"), ("CF", "Cash Flow")]:
+        group = [i for i in items if i.get("sj_div") == sj_div]
+        if not group:
+            continue
+        section.append(f"\n### {sj_label}")
+        for item in group[:20]:
+            val      = item.get("thstrm_amount", "N/A")
+            prev_val = item.get("frmtrm_amount", "N/A")
+            section.append(f"  {item.get('account_nm')}: {val} (prev: {prev_val})")
+
+    return "\n".join(section) + "\n"
+
+
+def fetch_and_format_reports(corp_info: dict, reports_plan: list,
+                             coverage_note: str = "") -> str:
+    """
+    Fetch multiple DART reports according to a plan from dart_report_planner
+    and format them into a single string for the FundamentalAgent.
+
+    Parameters
+    ----------
+    corp_info      : company info dict from lookup_company()
+    reports_plan   : list of {"year", "reprt_code", "label"} from plan_reports()
+    coverage_note  : optional pre-built coverage note from build_coverage_note()
+    """
+    corp_code = corp_info.get("corp_code", "")
+    lines = []
+
+    # ── Company header ────────────────────────────────────────────────────
+    lines.append("## Company Information")
+    lines.append(f"Name: {corp_info.get('corp_name')}")
+    lines.append(f"Stock Code: {corp_info.get('stock_code')}")
+    lines.append(f"CEO: {corp_info.get('ceo_nm')}")
+    lines.append(f"Main Products/Services: {corp_info.get('prd_nm', 'N/A')}")
+    lines.append(f"Founded: {corp_info.get('est_dt', 'N/A')}")
+    lines.append(f"Employees: {corp_info.get('enpls_nm', 'N/A')}")
+    lines.append(f"Homepage: {corp_info.get('hm_url', 'N/A')}")
+    lines.append("")
+
+    # ── Coverage note ─────────────────────────────────────────────────────
+    if coverage_note:
+        lines.append(coverage_note)
+
+    # ── Fetch and format each planned report ──────────────────────────────
+    fetched_count = 0
+    for spec in reports_plan:
+        fs_data = fetch_financial_statements(
+            corp_code, spec["year"], spec["reprt_code"]
+        )
+        lines.append(_format_single_fs(fs_data, spec["label"]))
+        lines.append("")
+        if fs_data.get("status") == "000" and fs_data.get("list"):
+            fetched_count += 1
+
+    if fetched_count == 0:
+        lines.append(
+            "⚠️  No DART financial data was returned for any planned report. "
+            "The company may not file structured financials via OpenDART, "
+            "or the corp_code mapping may be incorrect. "
+            "Base your analysis on publicly known information and flag the data gap."
+        )
 
     return "\n".join(lines)

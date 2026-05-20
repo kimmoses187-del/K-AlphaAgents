@@ -131,7 +131,7 @@ class RebalanceEngine:
                 portfolios = construct_portfolio(stock_debate_results)
             else:
                 all_results, portfolios = self._run_quarter_analysis(
-                    stock_codes, corp_infos, q_start
+                    stock_codes, corp_infos, q_start, q_num=q_num
                 )
 
             # Quarter-start weights → schedule
@@ -176,12 +176,16 @@ class RebalanceEngine:
         stock_codes: List[str],
         corp_infos: Dict[str, dict],
         as_of_date: datetime,
+        q_num: int = 1,
     ) -> Tuple[dict, dict]:
         """Run full 5-agent debate for every stock; return (all_results, portfolios)."""
+        # Q1 = initial full picture (3 annual reports + all interim)
+        # Q2+ = rebalancing delta (1 annual + most recent interim only)
+        stage = "initial" if q_num == 1 else "rebalancing"
         all_results = {}
         for code in stock_codes:
             result = self.orchestrator.analyze_stock(
-                code, as_of_date, corp_infos[code]
+                code, as_of_date, corp_infos[code], stage=stage
             )
             all_results[code] = result
 

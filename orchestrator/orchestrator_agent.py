@@ -8,7 +8,8 @@ from typing import Optional
 import anthropic
 
 from config import ANTHROPIC_API_KEY, CLAUDE_MODEL
-from tools.dart_tools import fetch_financial_statements, format_financial_data
+from tools.dart_tools import fetch_and_format_reports
+from tools.dart_report_planner import plan_reports, build_coverage_note, describe_plan
 from tools.yfinance_tools import (get_yfinance_ticker, fetch_price_history,
                                    fetch_news, format_news_for_llm)
 from tools.metrics_tools import calculate_price_metrics, format_metrics_for_llm
@@ -63,7 +64,7 @@ class OrchestratorAgent:
     # ── Phase 1: single-stock analysis ───────────────────────────────────────
 
     def analyze_stock(self, stock_code: str, as_of_date: datetime,
-                      corp_info: dict) -> dict:
+                      corp_info: dict, stage: str = "initial") -> dict:
         """
         Fetch data and run the 5-agent debate for one stock.
         Saves per-profile markdown reports.
@@ -75,7 +76,7 @@ class OrchestratorAgent:
         print(f"  Analyzing {company_name} ({stock_code})")
         print(f"{'─'*60}")
 
-        data           = self._fetch_data(stock_code, as_of_date, corp_info)
+        data           = self._fetch_data(stock_code, as_of_date, corp_info, stage=stage)
         debate_results = self._run_debates(company_name, data)
 
         # Per-stock markdown reports (no portfolio weights yet)
@@ -242,16 +243,15 @@ class OrchestratorAgent:
     # ── Private helpers ───────────────────────────────────────────────────────
 
     def _fetch_data(self, stock_code: str, as_of_date: datetime,
-                    corp_info: dict) -> dict:
+                    corp_info: dict, stage: str = "initial") -> dict:
         print("\n  [1/2] Fetching data...")
-        corp_code    = corp_info["corp_code"]
         company_name = corp_info["corp_name"]
 
-        current_year = as_of_date.year - 1
-        print(f"    DART: FY{current_year} and FY{current_year - 1}...")
-        fs_current       = fetch_financial_statements(corp_code, current_year)
-        fs_prev          = fetch_financial_statements(corp_code, current_year - 1)
-        fundamental_data = format_financial_data(corp_info, fs_current, fs_prev, current_year)
+        # ── DART: dynamic report planning ─────────────────────────────────
+        reports_plan  = plan_reports(as_of_date, stage=stage)
+        cov_note      = build_coverage_note(reports_plan, as_of_date)
+        print(f"    {describe_plan(reports_plan, as_of_date, stage)}")
+        fundamental_data = fetch_and_format_reports(corp_info, reports_plan, cov_note)
 
         print("    yfinance: price history + news...")
         ticker_obj, ticker_str = get_yfinance_ticker(stock_code)

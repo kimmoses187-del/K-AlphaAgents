@@ -5,6 +5,27 @@ Format: `[YYYY-MM-DD] — Summary`
 
 ---
 
+## [2026-05-20] — Upgrade MarketAgent data: DART sector, pykrx peers, KOSDAQ benchmark
+
+### A — Peer returns via pykrx (replaces yfinance)
+- `get_peer_comparison()` now uses `krx.get_market_ohlcv_by_date()` for 3-month peer returns — more reliable than yfinance for KRX stocks
+- yfinance retained only for peer names and P/E/P/B ratios (optional, graceful fallback to ticker code)
+- `KOREAN_SECTOR_PEERS` expanded with KOSDAQ peers in Healthcare and other sectors
+
+### B — KOSDAQ benchmark alongside KOSPI
+- `format_market_data_for_llm()` now displays both KOSPI and KOSDAQ 3M returns
+- Primary benchmark auto-selected from DART `corp_cls`: KOSPI stocks compare to KOSPI (★), KOSDAQ stocks compare to KOSDAQ (★)
+- Benchmark returns reused from pykrx fetch already performed for TechnicalAgent — no duplicate API call
+
+### D — DART sector detection replaces yfinance `.info`
+- New `KSIC_TO_SECTOR` mapping (33 entries, covers C10–C33 manufacturing sub-divisions + major divisions A–S)
+- `ksic_to_sector()` maps DART `induty_code` to sector: tries 3-char prefix first (`"C26"` → Technology), then 1-char fallback (`"C"`)
+- `get_company_sector_info()` uses DART `corp_info` as primary: `induty_code` → sector, `corp_cls` → exchange label
+- yfinance `.info` optionally enriches valuation ratios and business description (all fields `None` if unavailable)
+- Orchestrator passes `corp_info` (not `ticker_obj`) to sector function; `get_kospi_return()` import removed
+
+---
+
 ## [2026-05-20] — Upgrade ValuationAgent → TechnicalAgent with full indicator suite
 
 ### New files

@@ -14,8 +14,8 @@ from tools.yfinance_tools import get_yfinance_ticker, fetch_news, format_news_fo
 from tools.pykrx_tools import (fetch_ohlcv, fetch_index_ohlcv,
                                 KOSPI_INDEX, KOSDAQ_INDEX)
 from tools.metrics_tools import calculate_price_metrics, format_metrics_for_llm
-from tools.market_tools import (get_company_sector_info, get_kospi_return,
-                                 get_peer_comparison, format_market_data_for_llm)
+from tools.market_tools import (get_company_sector_info, get_peer_comparison,
+                                format_market_data_for_llm)
 from tools.macro_tools import fetch_macro_indicators, format_macro_data_for_llm
 from debate.debate_manager import DebateManager
 from portfolio.portfolio_agent import construct_portfolio, compute_conviction, BOND_TICKER
@@ -279,11 +279,25 @@ class OrchestratorAgent:
             pass   # SentimentAgent will note no news available
         sentiment_data = format_news_for_llm(news_items)
 
+        # ── Market: sector from DART + peer returns via pykrx ────────────────
         print("    sector / peers / macro...")
-        sector_info  = get_company_sector_info(ticker_obj)
-        kospi_return = get_kospi_return(as_of_date)
-        peers        = get_peer_comparison(ticker_str, sector_info.get("sector", ""), as_of_date)
-        market_data  = format_market_data_for_llm(sector_info, kospi_return, peers, company_name)
+
+        # Compute benchmark returns from already-fetched pykrx history (no extra call)
+        def _period_ret(hist):
+            if hist is None or hist.empty:
+                return None
+            c = hist["Close"].dropna()
+            return round((float(c.iloc[-1]) / float(c.iloc[0]) - 1) * 100, 2) if len(c) >= 2 else None
+
+        kospi_return  = _period_ret(kospi_history)
+        kosdaq_return = _period_ret(kosdaq_history)
+
+        # Sector detection: DART corp_info (primary) + yfinance ratios (optional)
+        sector_info = get_company_sector_info(corp_info, ticker_str)
+        peers       = get_peer_comparison(stock_code, sector_info.get("sector", ""), as_of_date)
+        market_data = format_market_data_for_llm(
+            sector_info, kospi_return, kosdaq_return, peers, company_name
+        )
 
         macro_indicators = fetch_macro_indicators(as_of_date)
         macro_data       = format_macro_data_for_llm(macro_indicators,

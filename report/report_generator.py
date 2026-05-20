@@ -29,7 +29,7 @@ def generate_report(debate_result: dict, corp_info: dict,
         f"|-------|-------|",
         f"| **Company** | {company_name} |",
         f"| **Stock Code** | {corp_info.get('stock_code', 'N/A')} |",
-        f"| **Ticker (yfinance)** | {ticker_str} |",
+        f"| **Ticker** | {ticker_str} |",
         f"| **CEO** | {corp_info.get('ceo_nm', 'N/A')} |",
         f"| **Analysis Date** | {datetime.now().strftime('%Y-%m-%d %H:%M')} |",
         f"| **Data As-Of** | {as_of_date.strftime('%Y-%m-%d') if as_of_date else 'N/A'} |",
@@ -66,7 +66,7 @@ def generate_report(debate_result: dict, corp_info: dict,
     if metrics:
         lines += [
             "---",
-            "## Key Valuation Metrics (3-Month Window)",
+            "## Key Technical Metrics (3-Month Window)",
             "",
             f"| Metric | Value |",
             f"|--------|-------|",
@@ -77,6 +77,22 @@ def generate_report(debate_result: dict, corp_info: dict,
             f"| Avg Daily Volume | {metrics.get('avg_daily_volume', 0):,.0f} shares |",
             f"| 3M High | {metrics.get('price_high', 'N/A'):,} KRW |",
             f"| 3M Low | {metrics.get('price_low', 'N/A'):,} KRW |",
+            *(
+                [f"| RSI (14-day) | {metrics.get('rsi'):.1f} |"]
+                if "rsi" in metrics else []
+            ),
+            *(
+                [f"| 20-day MA | {metrics.get('ma20', 'N/A'):,} KRW  ({metrics.get('pct_vs_ma20', 0):+.1f}%) |"]
+                if "ma20" in metrics else []
+            ),
+            *(
+                [f"| Alpha vs KOSPI | {metrics.get('alpha_vs_kospi', 0):+.2f}% |"]
+                if "alpha_vs_kospi" in metrics else []
+            ),
+            *(
+                [f"| Return QoQ Δ | {metrics.get('return_qoq_delta', 0):+.2f}% |"]
+                if "return_qoq_delta" in metrics else []
+            ),
             "",
         ]
 

@@ -10,8 +10,9 @@ import anthropic
 from config import ANTHROPIC_API_KEY, CLAUDE_MODEL
 from tools.dart_tools import fetch_and_format_reports
 from tools.dart_report_planner import plan_reports, build_coverage_note, describe_plan
-from tools.yfinance_tools import (get_yfinance_ticker, fetch_price_history,
-                                   fetch_news, format_news_for_llm)
+from tools.yfinance_tools import get_yfinance_ticker, fetch_news, format_news_for_llm
+from tools.pykrx_tools import (fetch_ohlcv, fetch_index_ohlcv,
+                                KOSPI_INDEX, KOSDAQ_INDEX)
 from tools.metrics_tools import calculate_price_metrics, format_metrics_for_llm
 from tools.market_tools import (get_company_sector_info, get_kospi_return,
                                  get_peer_comparison, format_market_data_for_llm)
@@ -253,13 +254,30 @@ class OrchestratorAgent:
         print(f"    {describe_plan(reports_plan, as_of_date, stage)}")
         fundamental_data = fetch_and_format_reports(corp_info, reports_plan, cov_note)
 
-        print("    yfinance: price history + news...")
-        ticker_obj, ticker_str = get_yfinance_ticker(stock_code)
-        price_history  = fetch_price_history(ticker_obj, as_of_date)
-        news_items     = fetch_news(ticker_obj, as_of_date)
-        metrics        = calculate_price_metrics(price_history)
+        # ── pykrx: price history (current + previous quarter + benchmarks) ─
+        print("    pykrx: price history (current + prev quarter + KOSPI/KOSDAQ)...")
+        price_history  = fetch_ohlcv(stock_code, as_of_date, months=3, offset_months=0)
+        prev_quarter   = fetch_ohlcv(stock_code, as_of_date, months=3, offset_months=3)
+        kospi_history  = fetch_index_ohlcv(KOSPI_INDEX,  as_of_date, months=3)
+        kosdaq_history = fetch_index_ohlcv(KOSDAQ_INDEX, as_of_date, months=3)
+        metrics = calculate_price_metrics(
+            price_history,
+            prev_quarter   = prev_quarter   if not prev_quarter.empty   else None,
+            kospi_history  = kospi_history  if not kospi_history.empty  else None,
+            kosdaq_history = kosdaq_history if not kosdaq_history.empty else None,
+        )
+        technical_data = format_metrics_for_llm(metrics, stock_code)
+
+        # ── yfinance: news for SentimentAgent (graceful fallback if missing) ─
+        print("    yfinance: news...")
+        news_items     = []
+        ticker_str     = f"{stock_code}.KS"   # display label fallback
+        try:
+            ticker_obj, ticker_str = get_yfinance_ticker(stock_code)
+            news_items = fetch_news(ticker_obj, as_of_date)
+        except Exception:
+            pass   # SentimentAgent will note no news available
         sentiment_data = format_news_for_llm(news_items)
-        valuation_data = format_metrics_for_llm(metrics, ticker_str)
 
         print("    sector / peers / macro...")
         sector_info  = get_company_sector_info(ticker_obj)
@@ -271,14 +289,15 @@ class OrchestratorAgent:
         macro_data       = format_macro_data_for_llm(macro_indicators,
                                                       sector_info.get("sector", "Unknown"))
 
-        print(f"    {ticker_str} | {len(price_history)} days | "
+        n_days = len(price_history) if not price_history.empty else 0
+        print(f"    {stock_code} | {n_days} days | "
               f"{len(news_items)} news | {len(peers)} peers | "
               f"{len(macro_indicators)} macro indicators")
 
         return {
             "fundamental_data": fundamental_data,
             "sentiment_data":   sentiment_data,
-            "valuation_data":   valuation_data,
+            "technical_data":   technical_data,
             "market_data":      market_data,
             "macro_data":       macro_data,
             "metrics":          metrics,
@@ -294,7 +313,7 @@ class OrchestratorAgent:
                 company_name=company_name,
                 fundamental_data=data["fundamental_data"],
                 sentiment_data=data["sentiment_data"],
-                valuation_data=data["valuation_data"],
+                technical_data=data["technical_data"],
                 market_data=data["market_data"],
                 macro_data=data["macro_data"],
             )

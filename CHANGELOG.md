@@ -5,6 +5,30 @@ Format: `[YYYY-MM-DD] — Summary`
 
 ---
 
+## [2026-05-20] — Upgrade ValuationAgent → TechnicalAgent with full indicator suite
+
+### New files
+- `tools/pykrx_tools.py` — KRX price fetching via pykrx (replaces yfinance for stock prices)
+  - `fetch_ohlcv(stock_code, as_of_date, months, offset_months)` — current or prior-quarter window
+  - `fetch_index_ohlcv(index_code, ...)` — KOSPI (1001) and KOSDAQ (2001) index data
+- `agents/technical_agent.py` — replaces `agents/valuation_agent.py`
+  - System prompt updated to explicitly cover MA, RSI, Bollinger Bands, relative performance, QoQ delta
+  - Agent name changed to `"TechnicalAgent"`
+
+### Updated files
+- `tools/metrics_tools.py` — extended from 8 basic metrics to a full technical analysis dataset:
+  - **Moving Averages**: 20d MA, 60d MA, % vs MA, consecutive days closing below MA20
+  - **RSI**: 14-day Wilder's RSI with overbought (>70) / oversold (<30) zone labels
+  - **Bollinger Bands**: 20d ±2σ; %B position (0 = lower band, 1 = upper band); normalised band width
+  - **Relative Performance**: stock alpha vs KOSPI and KOSDAQ over the identical 3-month window
+  - **QoQ Delta**: period return change and annualised volatility change vs the prior quarter
+  - `format_metrics_for_llm()` now outputs 4 labelled sections for the agent
+- `debate/debate_manager.py` — `ValuationAgent` → `TechnicalAgent`; parameter `valuation_data` → `technical_data`
+- `orchestrator/orchestrator_agent.py` — `_fetch_data()` fetches current quarter, previous quarter, KOSPI, and KOSDAQ via pykrx; yfinance retained only for SentimentAgent news with graceful fallback
+- `report/report_generator.py` — "Key Valuation Metrics" → "Key Technical Metrics"; added RSI, MA20, alpha vs KOSPI, and return QoQ Δ rows to metric table
+
+---
+
 ## [2026-05-20] — Dynamic DART report planning for FundamentalAgent
 
 - New `tools/dart_report_planner.py` module:

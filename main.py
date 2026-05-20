@@ -541,6 +541,7 @@ def _run_rebalancing(
         narrative=narrative,
         as_of_date=end_date,
         backtest_results=backtest_results,
+        quarterly_log=quarterly_log,
     )
 
     print(f"\n{'='*60}")

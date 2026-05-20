@@ -358,6 +358,84 @@ def _build_metrics_table(company_names: dict, portfolios: dict,
     return tbl
 
 
+# ── Rebalancing history table ─────────────────────────────────────────────────
+
+def _build_rebalance_history(
+    company_names: dict,
+    quarterly_log: list,
+    sty: dict,
+    usable_w: float,
+    profile: str,
+) -> Table:
+    """
+    Build a compact rebalancing history table for one risk profile.
+
+    Rows = quarters (Q1 / Q2 / Q3 …)
+    Cols = Quarter date | Stock1 | Stock2 | … | Bond
+    Cell = "BUY 18.3%" in blue, "SELL —" in red, or "— —" if not in pool
+    """
+    profile_label = "Risk-Averse" if profile == "risk-averse" else "Risk-Neutral"
+    codes  = list(company_names.keys())
+    names  = [company_names[c] for c in codes]
+
+    # ── Header row ──
+    hdr_style = ParagraphStyle("rh", fontName=KOB, fontSize=7.5,
+                                textColor=colors.white, alignment=1)
+    hdr = (
+        [Paragraph("Quarter", hdr_style)]
+        + [Paragraph(n, hdr_style) for n in names]
+        + [Paragraph(BOND_NAME, hdr_style)]
+    )
+
+    # ── Data rows ──
+    buy_sty  = ParagraphStyle("rb", fontName=KOB, fontSize=7.5,
+                               textColor=colors.HexColor("#1A5276"), alignment=1)
+    sell_sty = ParagraphStyle("rs", fontName=KO,  fontSize=7.5,
+                               textColor=colors.HexColor("#922B21"), alignment=1)
+    cell_sty = ParagraphStyle("rc", fontName=KO,  fontSize=7.5,
+                               textColor=C_TEXT, alignment=1)
+
+    rows = [hdr]
+    style_cmds = [
+        ("BACKGROUND",    (0, 0), (-1, 0),  C_NAVY),
+        ("GRID",          (0, 0), (-1, -1), 0.4, colors.HexColor("#BDC3C7")),
+        ("ROWBACKGROUNDS",(0, 1), (-1, -1), [colors.white, C_GRAY_LITE]),
+        ("TOPPADDING",    (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("LEFTPADDING",   (0, 0), (-1, -1), 4),
+        ("RIGHTPADDING",  (0, 0), (-1, -1), 4),
+    ]
+
+    for q in quarterly_log:
+        q_label  = f"Q{q['quarter']}\n{q['start'].strftime('%Y-%m-%d')}"
+        allocs   = q["portfolios"][profile]["stock_allocations"]
+        bond_w   = q["portfolios"][profile]["bond_weight"]
+
+        row = [Paragraph(q_label, cell_sty)]
+        for code in codes:
+            alloc = allocs.get(code, {})
+            sig   = alloc.get("signal", "—")
+            wt    = alloc.get("weight", 0.0)
+            if sig == "BUY" and wt > 0:
+                row.append(Paragraph(f"BUY\n{wt*100:.1f}%", buy_sty))
+            elif sig == "SELL":
+                row.append(Paragraph("SELL\n—", sell_sty))
+            else:
+                row.append(Paragraph("—", cell_sty))
+        row.append(Paragraph(f"{bond_w*100:.0f}%", cell_sty))
+        rows.append(row)
+
+    n_cols    = 2 + len(codes)
+    date_w    = 1.6 * cm
+    bond_w_pt = 1.8 * cm
+    stock_w   = (usable_w - date_w - bond_w_pt) / max(len(codes), 1)
+    col_widths = [date_w] + [stock_w] * len(codes) + [bond_w_pt]
+
+    tbl = Table(rows, colWidths=col_widths, repeatRows=1)
+    tbl.setStyle(TableStyle(style_cmds))
+    return tbl
+
+
 # ── Public entry point ────────────────────────────────────────────────────────
 
 def build_pdf(
@@ -367,6 +445,7 @@ def build_pdf(
     narrative: str,
     as_of_date: datetime,
     backtest_results: Optional[dict] = None,
+    quarterly_log: Optional[list] = None,
 ) -> str:
     """
     Build the executive summary PDF and save to pdf_path.
@@ -376,16 +455,22 @@ def build_pdf(
     pdf_path         : output file path
     company_names    : {stock_code: company_name}
     portfolios       : output of portfolio_agent.construct_portfolio()
+                       (used for final-quarter allocation section)
     narrative        : LLM-generated cross-profile text (from orchestrator)
-    as_of_date       : analysis as-of date (also backtest start)
-    backtest_results : output of backtest.runner.run_backtest(), or None
+    as_of_date       : analysis as-of date (backtest start or rebalancing start)
+    backtest_results : output of run_backtest() / run_rebalanced_backtest(), or None
+    quarterly_log    : list of quarterly dicts from RebalanceEngine.run().
+                       If provided, a rebalancing history table is added (Page 1)
+                       and the signal table shows the final-quarter signals.
 
     Returns
     -------
     pdf_path
     """
-    sty      = _styles()
-    usable_w = W - 2 * MARGIN
+    is_rebalanced = quarterly_log is not None and len(quarterly_log) > 1
+
+    sty       = _styles()
+    usable_w  = W - 2 * MARGIN
     as_of_str = as_of_date.strftime("%Y-%m-%d")
     run_str   = datetime.now().strftime("%Y-%m-%d")
 
@@ -409,17 +494,44 @@ def build_pdf(
     # PAGE 1 — SIGNAL TABLE + PORTFOLIO ALLOCATION
     # ═══════════════════════════════════════════════════════════
 
-    story += _section_title("1.  Stock Signals & Conviction", sty)
+    if is_rebalanced:
+        # ── Rebalancing history (all quarters) ───────────────────────────
+        q_start_str = quarterly_log[0]["start"].strftime("%Y-%m-%d")
+        story += _section_title(
+            f"1.  Rebalancing History  ({q_start_str} → {as_of_str})", sty
+        )
+        story.append(Paragraph(
+            f"Portfolio rebalanced {len(quarterly_log)} time(s).  "
+            "Each quarter the 5-agent debate re-ran with fresh data.  "
+            "Intra-quarter event triggers (price drop / vol spike / momentum flip) "
+            "adjusted weights without LLM calls.",
+            sty["body"],
+        ))
+        story.append(Spacer(1, 0.3 * cm))
+
+        for profile in ("risk-averse", "risk-neutral"):
+            label = "Risk-Averse" if profile == "risk-averse" else "Risk-Neutral"
+            story.append(Paragraph(f"<b>{label}</b>", sty["body"]))
+            story.append(Spacer(1, 0.15 * cm))
+            story.append(_build_rebalance_history(
+                company_names, quarterly_log, sty, usable_w, profile
+            ))
+            story.append(Spacer(1, 0.35 * cm))
+
+        story.append(Spacer(1, 0.2 * cm))
+        story += _section_title("2.  Final Quarter Signals & Conviction", sty)
+    else:
+        story += _section_title("1.  Stock Signals & Conviction", sty)
+
     story.append(_build_signal_table(company_names, portfolios, sty, usable_w))
     story.append(Spacer(1, 0.5 * cm))
 
-    story += _section_title("2.  Portfolio Allocation", sty)
+    alloc_num = "3." if is_rebalanced else "2."
+    story += _section_title(f"{alloc_num}  Portfolio Allocation  (Final Quarter)", sty)
     story.append(_build_profile_cards(portfolios, sty, usable_w))
     story.append(Spacer(1, 0.5 * cm))
 
     # Donut pie charts
-    ra_bw = portfolios["risk-averse"]["bond_weight"]
-    rn_bw = portfolios["risk-neutral"]["bond_weight"]
     pw = usable_w / 2 - 0.4 * cm
     ph = pw * 0.9
     pie_l = _make_pie("Risk-Averse",  company_names, portfolios, "risk-averse")
@@ -440,32 +552,43 @@ def build_pdf(
     # ═══════════════════════════════════════════════════════════
     story.append(PageBreak())
 
-    story += _section_title("3.  Cross-Profile Investment Narrative", sty)
+    narr_num    = "4." if is_rebalanced else "3."
+    metrics_num = "5." if is_rebalanced else "4."
+    bt_num      = "6." if is_rebalanced else "5."
+
+    story += _section_title(f"{narr_num}  Cross-Profile Investment Narrative", sty)
     story.append(Paragraph(narrative, sty["body"]))
     story.append(Spacer(1, 0.6 * cm))
 
-    story += _section_title("4.  Portfolio Metrics at a Glance", sty)
+    story += _section_title(f"{metrics_num}  Portfolio Metrics at a Glance  (Final Quarter)", sty)
     story.append(_build_metrics_table(company_names, portfolios, sty, usable_w))
     story.append(Spacer(1, 0.6 * cm))
 
     if backtest_results is not None:
-        bt_start = as_of_str
-        bt_end   = backtest_results["risk-averse"].end
+        bt_engine = backtest_results.get("risk-averse") or backtest_results.get("risk-neutral")
+        bt_start  = bt_engine.start if bt_engine else as_of_str
+        bt_end    = bt_engine.end   if bt_engine else "—"
+        bt_label  = "Rebalanced Backtest" if is_rebalanced else "Backtest Results"
         story += _section_title(
-            f"5.  Backtest Results  ({bt_start} → {bt_end})", sty
+            f"{bt_num}.  {bt_label}  ({bt_start} → {bt_end})", sty
         )
         bt_fig = _make_backtest_fig(backtest_results)
         story.append(_fig_to_rl_image(bt_fig, usable_w, usable_w * 0.52))
         story.append(Spacer(1, 0.2 * cm))
+        caption_extra = (
+            "  Portfolio line shows time-varying weights across all quarterly rebalances."
+            if is_rebalanced else ""
+        )
         story.append(Paragraph(
             "Benchmarks: equal-weight of all analysed stocks (EW Benchmark, orange), "
             "KOSPI (green), and KOSDAQ (purple).  "
             "Rolling Sharpe computed over a 30-trading-day window; "
-            "the left margin is intentionally blank during the warm-up period.",
+            "the left margin is intentionally blank during the warm-up period."
+            + caption_extra,
             sty["caption"],
         ))
     else:
-        story += _section_title("5.  Backtest", sty)
+        story += _section_title(f"{bt_num}.  Backtest", sty)
         story.append(Paragraph(
             "Backtesting was skipped — no stocks qualified for equity allocation "
             "in either risk profile.  All capital is preserved in the Korean "

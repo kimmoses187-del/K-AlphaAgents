@@ -5,6 +5,53 @@ Format: `[YYYY-MM-DD] — Summary`
 
 ---
 
+## [2026-05-20] — Dynamic DART report planning for FundamentalAgent
+
+- New `tools/dart_report_planner.py` module:
+  - `plan_reports(as_of_date, stage)` determines which DART reports to fetch based on Korea's actual filing calendar (annual deadline: Mar 31, Q1: May 15, H1: Aug 14, Q3: Nov 14)
+  - `stage="initial"` fetches 3 annual FYs + all available interim reports (full picture)
+  - `stage="rebalancing"` fetches 1 annual FY + single most recent interim report (delta focus)
+  - `build_coverage_note()` generates an LLM-readable list of fetched vs. missing periods
+- `tools/dart_tools.py` — added `fetch_and_format_reports()` to fetch multiple reports per plan and format into one string; extracted `_format_single_fs()` as a shared helper; added clear warning when DART returns no data
+- `orchestrator/orchestrator_agent.py` — `analyze_stock()` and `_fetch_data()` now accept `stage` parameter and use the planner instead of hardcoded `year - 1` logic
+- `rebalance/rebalance_engine.py` — `_run_quarter_analysis()` auto-derives stage from `q_num` (Q1 → "initial", Q2+ → "rebalancing")
+
+---
+
+## [2026-05-20] — Fix: auto-select rebalancing file when only one exists
+
+- When only one `Rebalanced_*.json` file exists in `reports/`, `main.py` now skips the file-selection prompt and loads it automatically
+- Removes confusing "select file" interaction when there is no real choice to make
+
+---
+
+## [2026-05-20] — Add [B] mode: load saved rebalancing → backtest
+
+- `main.py` — post-analysis menu now includes `[B] Load saved rebalancing` option when any `Rebalanced_*.json` files exist
+- `_save_rebalancing_json()` serialises weight schedule + quarterly log to `reports/Rebalanced_{start_date}.json` after every [R] run
+- `_load_rebalancing_json()` deserialises JSON back to Python, reconstructing `[(datetime, weights_dict), ...]` for the weight schedule
+- `_load_rebalancing_backtest_flow()` loads the JSON, optionally extends the end date, runs the rebalanced backtest, and generates a PDF — zero LLM calls
+- `results` field excluded from serialised quarterly log (too large; per-stock signals already persisted in individual JSON files)
+
+---
+
+## [2026-05-20] — Show all quarterly portfolios in rebalanced PDF executive summary
+
+- `report/summary_renderer.py` — added `_build_rebalance_history()` which renders a table of all quarterly portfolio snapshots (Q1 start, Q2 rebalance, Q3 rebalance …) with BUY cells in blue and SELL/excluded cells in red
+- `build_pdf()` now accepts an optional `quarterly_log` parameter; when provided, the PDF gains a §1 Rebalancing History section and section numbers shift accordingly
+- Previously the PDF only showed the final quarter's portfolio, hiding the rebalancing decisions that drove returns
+
+---
+
+## [2026-05-20] — Refactor: rebalancing choice moved to post-analysis prompt
+
+- Replaced top-level `[R] Rebalancing` main menu option with a post-analysis `[S] Standard backtest / [R] Rebalancing` prompt shown after stock analysis completes
+- Both paths share the same debate results, avoiding any duplicate LLM analysis
+- Q1 rebalancing re-uses pre-computed results from the `[N]`/`[L]` analysis via `initial_results` parameter passed to `RebalanceEngine.run()`
+- Benchmark selection adapts to the chosen path: standard backtest shows KOSPI/KOSDAQ vs EW; rebalanced backtest shows the same benchmarks against the time-varying rebalanced portfolio
+
+---
+
 ## [2026-05-20] — Add portfolio rebalancing ([R] mode)
 
 - New `rebalance/` module with three components:

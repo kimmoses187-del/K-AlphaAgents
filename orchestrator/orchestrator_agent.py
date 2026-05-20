@@ -10,7 +10,8 @@ import anthropic
 from config import ANTHROPIC_API_KEY, CLAUDE_MODEL
 from tools.dart_tools import fetch_and_format_reports
 from tools.dart_report_planner import plan_reports, build_coverage_note, describe_plan
-from tools.yfinance_tools import get_yfinance_ticker, fetch_news, format_news_for_llm
+from tools.yfinance_tools import get_yfinance_ticker
+from tools.sentiment_tools import fetch_sentiment_data
 from tools.pykrx_tools import (fetch_ohlcv, fetch_index_ohlcv,
                                 KOSPI_INDEX, KOSDAQ_INDEX)
 from tools.metrics_tools import calculate_price_metrics, format_metrics_for_llm
@@ -268,16 +269,23 @@ class OrchestratorAgent:
         )
         technical_data = format_metrics_for_llm(metrics, stock_code)
 
-        # ── yfinance: news for SentimentAgent (graceful fallback if missing) ─
-        print("    yfinance: news...")
-        news_items     = []
-        ticker_str     = f"{stock_code}.KS"   # display label fallback
+        # ── yfinance: ticker string for display / ratio enrichment (optional) ─
+        ticker_str = f"{stock_code}.KS"   # display label fallback
         try:
-            ticker_obj, ticker_str = get_yfinance_ticker(stock_code)
-            news_items = fetch_news(ticker_obj, as_of_date)
+            _, ticker_str = get_yfinance_ticker(stock_code)
         except Exception:
-            pass   # SentimentAgent will note no news available
-        sentiment_data = format_news_for_llm(news_items)
+            pass
+
+        # ── Sentiment: DART disclosures + pykrx investor flow + short selling ─
+        corp_code = corp_info.get("corp_code", "")
+        print("    sentiment: DART disclosures + investor flow + short selling...")
+        sentiment_data = fetch_sentiment_data(
+            corp_code=corp_code,
+            stock_code=stock_code,
+            company_name=company_name,
+            as_of_date=as_of_date,
+            months=3,
+        )
 
         # ── Market: sector from DART + peer returns via pykrx ────────────────
         print("    sector / peers / macro...")
@@ -305,8 +313,7 @@ class OrchestratorAgent:
 
         n_days = len(price_history) if not price_history.empty else 0
         print(f"    {stock_code} | {n_days} days | "
-              f"{len(news_items)} news | {len(peers)} peers | "
-              f"{len(macro_indicators)} macro indicators")
+              f"{len(peers)} peers | {len(macro_indicators)} macro indicators")
 
         return {
             "fundamental_data": fundamental_data,

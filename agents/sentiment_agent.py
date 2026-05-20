@@ -3,40 +3,50 @@ from agents.base_agent import BaseAgent, STEELMAN_INSTRUCTION, CHALLENGE_INSTRUC
 _SYSTEMS = {
     "risk-averse": """You are a risk-averse sentiment equity analyst specialising in Korean equities (KOSPI/KOSDAQ).
 
-You analyse financial news, analyst commentary, and market sentiment to assess a stock's investment outlook.
+You analyse three structured data sources to assess a stock's behavioural and sentiment signals:
+  D — DART corporate disclosures (material events, insider trades, dilution risk, litigation)
+  E — Investor net flow by type (foreign / institutional / retail net buying or selling)
+  F — Short-selling pressure (average ratio, trend, recent 5-day level)
 
 As a RISK-AVERSE analyst your priorities are:
-- Weight negative news and downside signals more heavily than positive ones
-- Flag governance concerns, regulatory risks, or negative analyst actions prominently
-- Treat promotional or hype-driven sentiment with scepticism
-- Mixed or uncertain sentiment → lean SELL
+- Weight negative signals more heavily: distribution by foreign/institutional players, rising short ratio,
+  dilution events (CB, rights offering), litigation or regulatory disclosures
+- Treat retail-only buying (while institutions/foreigners sell) with scepticism
+- Buybacks and bonus issues are mildly positive, not sufficient alone for BUY
+- Absence of disclosures is neutral, not bullish
+- Mixed or uncertain picture → lean SELL
 
 Your analysis must cover:
-1. Overall news sentiment (positive / neutral / negative) with key evidence
-2. Dominant themes in recent news (earnings, product, leadership, litigation, macro)
-3. Any analyst rating changes or price-target revisions
-4. Executive, insider, or governance-related news
-5. Regulatory, industry, or macro headwinds visible in the news
+1. Material disclosures in DART — any red flags (litigation, dilution, insider selling)?
+2. Who is driving net flow — foreign/institutional accumulation or distribution?
+3. Short-selling level and trend — rising, stable, or falling bearish pressure?
+4. Overall sentiment verdict synthesising all three sources
+5. Key risk(s) to monitor
 
 Close your response with exactly this line:
 RECOMMENDATION: BUY  or  RECOMMENDATION: SELL""",
 
     "risk-neutral": """You are a risk-neutral sentiment equity analyst specialising in Korean equities (KOSPI/KOSDAQ).
 
-You analyse financial news, analyst commentary, and market sentiment to assess a stock's investment outlook.
+You analyse three structured data sources to assess a stock's behavioural and sentiment signals:
+  D — DART corporate disclosures (material events, insider trades, dilution risk, litigation)
+  E — Investor net flow by type (foreign / institutional / retail net buying or selling)
+  F — Short-selling pressure (average ratio, trend, recent 5-day level)
 
 As a RISK-NEUTRAL analyst your priorities are:
-- Weigh positive and negative news proportionally to their significance
-- Positive analyst upgrades, strong earnings coverage, and product momentum are valid BUY signals
-- Flag genuine risks but do not over-penalise isolated negative headlines
-- Let the overall weight of sentiment — not a conservative default — drive your recommendation
+- Weigh positive and negative signals proportionally to their significance
+- Foreign or institutional accumulation is a meaningful BUY signal
+- Buybacks and low/falling short interest support BUY thesis
+- Dilution events and rising short interest are genuine risks but do not override strong institutional buying
+- Absent disclosures and stable short interest → slight positive (no red flags)
+- Let the overall weight of all three sources — not a conservative default — drive your recommendation
 
 Your analysis must cover:
-1. Overall news sentiment (positive / neutral / negative) with key evidence
-2. Dominant themes in recent news (earnings, product, leadership, litigation, macro)
-3. Any analyst rating changes or price-target revisions
-4. Executive, insider, or governance-related news
-5. Net sentiment balance: bullish catalysts vs bearish risks
+1. Material disclosures in DART — positive catalysts or negative events?
+2. Who is driving net flow — accumulation or distribution pattern?
+3. Short-selling level and trend — what does bearish positioning signal here?
+4. Overall sentiment verdict synthesising all three sources
+5. Net balance: bullish signals vs bearish risks
 
 Close your response with exactly this line:
 RECOMMENDATION: BUY  or  RECOMMENDATION: SELL""",
@@ -49,27 +59,28 @@ class SentimentAgent(BaseAgent):
         super().__init__("SentimentAgent", system)
         self.risk_profile = risk_profile
 
-    def analyze(self, news_data: str, company_name: str) -> dict:
+    def analyze(self, sentiment_data: str, company_name: str) -> dict:
         prompt = f"""Perform a comprehensive sentiment analysis for **{company_name}**.
 
-=== RECENT NEWS & MARKET SIGNALS ===
-{news_data}
-=== END NEWS ===
+=== SENTIMENT DATA (DART + pykrx) ===
+{sentiment_data}
+=== END DATA ===
 
-Analyse overall sentiment and its implications consistent with your risk profile.
+Analyse signals from all three sources (D: disclosures, E: investor flow, F: short selling)
+consistent with your risk profile.
 {STEELMAN_INSTRUCTION}
 End your response with:
 RECOMMENDATION: BUY  or  RECOMMENDATION: SELL"""
         analysis = self.call_llm(prompt)
         return {"agent": self.name, "analysis": analysis, "signal": self.extract_signal(analysis, self.risk_profile)}
 
-    def update_position(self, news_data: str, company_name: str,
+    def update_position(self, sentiment_data: str, company_name: str,
                         peer_analyses: list, round_num: int) -> dict:
         peer_block = "\n\n".join(
             f"### {p['agent']} (Signal: {p['signal']})\n{p['analysis']}"
             for p in peer_analyses
         )
-        prompt = f"""You have already analysed **{company_name}** from a sentiment/news perspective.
+        prompt = f"""You have already analysed **{company_name}** from a sentiment perspective (DART disclosures, investor flow, short selling).
 
 Review your peers' analyses and decide whether to maintain or revise your recommendation.
 
@@ -77,8 +88,8 @@ Review your peers' analyses and decide whether to maintain or revise your recomm
 {peer_block}
 === END PEER ANALYSES ===
 
-=== YOUR NEWS DATA ===
-{news_data}
+=== YOUR SENTIMENT DATA ===
+{sentiment_data}
 === END DATA ===
 
 Debate Round {round_num}: State clearly whether you are MAINTAINING or CHANGING your position and why.

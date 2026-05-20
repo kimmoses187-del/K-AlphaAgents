@@ -5,6 +5,25 @@ Format: `[YYYY-MM-DD] — Summary`
 
 ---
 
+## [2026-05-20] — Upgrade SentimentAgent: DART disclosures + pykrx investor flow + short selling
+
+### Problem
+yfinance news for Korean stocks returns empty results — SentimentAgent had no real data to analyse.
+
+### New file
+- `tools/sentiment_tools.py` — three reliable Korean-market sentiment sources:
+  - **D — DART disclosures** (`fetch_dart_disclosures`): corporate events over the quarter window via `/api/list.json`; categorises each filing (Litigation, Dilution Risk, Buyback, M&A, Insider Ownership Change, Fair Disclosure, Material Event); capped at 20 entries to limit token usage
+  - **E — pykrx investor flow** (`fetch_investor_flow`): cumulative 3-month net buying in KRW for Foreign, Institutional, and Retail investors via `get_market_net_purchases_of_equities_by_investor()`; includes interpretation (accumulation vs distribution signal)
+  - **F — pykrx short selling** (`fetch_short_selling`): average / max / recent 5-day short ratio and trend (Rising/Falling/Stable) via `get_market_short_selling_volume_by_date()`; threshold labels (>5% high, 2.5–5% moderate, <2.5% low)
+  - `format_sentiment_data_for_llm()` — combines all three into a single structured string with 3 labelled sections
+  - `fetch_sentiment_data()` — master function called by orchestrator
+
+### Updated files
+- `agents/sentiment_agent.py` — system prompts rewritten to cover the three new data sources; both risk profiles now explicitly reference D/E/F sections and signal interpretation guidelines
+- `orchestrator/orchestrator_agent.py` — replaced `fetch_news()` + `format_news_for_llm()` with `fetch_sentiment_data()`; yfinance retained only for `get_yfinance_ticker()` (exchange suffix for market tools)
+
+---
+
 ## [2026-05-20] — Upgrade MarketAgent data: DART sector, pykrx peers, KOSDAQ benchmark
 
 ### A — Peer returns via pykrx (replaces yfinance)

@@ -432,6 +432,160 @@ def _new_analysis_flow(orchestrator: OrchestratorAgent) -> tuple[dict, datetime]
     return all_results, as_of_date
 
 
+# ── Rebalancing flow ──────────────────────────────────────────────────────────
+
+def _rebalancing_flow(orchestrator: OrchestratorAgent) -> None:
+    """
+    [R] Rebalancing mode.
+
+    1. Ask for start date (first quarterly analysis date) and end date.
+    2. Build stock pool via DART lookup.
+    3. Run RebalanceEngine:
+         - Full 5-agent debate every quarter
+         - Intra-quarter event-triggered re-weighting (no LLM)
+    4. Run time-varying backtest with the resulting weight schedule.
+    5. Generate executive summary PDF for the final quarter.
+    """
+    from rebalance.rebalance_engine import RebalanceEngine
+    from backtest.runner import run_rebalanced_backtest
+    from report.summary_renderer import build_pdf
+
+    print("\n  --- REBALANCING MODE ---")
+    print("  Quarterly LLM rebalance + intra-quarter event-triggered re-weighting.\n")
+
+    start_date = _ask_date(
+        "  Enter rebalancing start date (YYYY/MM/DD)"
+        " — first quarterly analysis date: "
+    )
+    while True:
+        end_date = _ask_date(
+            "  Enter backtest end date (YYYY/MM/DD)"
+            f" [must be after {start_date.strftime('%Y-%m-%d')}]: "
+        )
+        if end_date > start_date:
+            break
+        print(f"  End date must be after {start_date.strftime('%Y-%m-%d')}. Try again.")
+
+    # ── Build stock pool ──────────────────────────────────────────────────
+    stock_codes = []
+    corp_infos  = {}
+
+    while True:
+        n = len(stock_codes) + 1
+        print(f"\n  Stock #{n}  ({len(stock_codes)} in pool so far)")
+        stock_code = input("  Enter stock ticker (e.g. 005930): ").strip()
+        if not stock_code:
+            if not stock_codes:
+                print("  No stocks entered. Exiting.")
+                sys.exit(1)
+            print("  Empty input — ending stock entry.")
+            break
+        if stock_code in stock_codes:
+            print(f"  {stock_code} already in pool. Skipping.")
+            continue
+        print("  Looking up company on OpenDART...")
+        try:
+            corp_info = lookup_company(stock_code)
+        except Exception as e:
+            print(f"  Error: {e}. Skipping.")
+            continue
+        print(f"  Confirmed: {corp_info['corp_name']}  ({stock_code})")
+        stock_codes.append(stock_code)
+        corp_infos[stock_code] = corp_info
+
+        more = input(
+            f"\n  Add another stock? (Y/N) [{len(stock_codes)} in pool]: "
+        ).strip().upper()
+        if more != "Y":
+            break
+
+    # ── Ask about event triggers ──────────────────────────────────────────
+    use_events = input(
+        "\n  Enable intra-quarter event-triggered re-weighting? (Y/N) [Y]: "
+    ).strip().upper()
+    use_events = use_events != "N"
+
+    # ── Run rebalancing engine ────────────────────────────────────────────
+    engine = RebalanceEngine(orchestrator)
+    weight_schedule, quarterly_log = engine.run(
+        stock_codes=stock_codes,
+        corp_infos=corp_infos,
+        start_date=start_date,
+        end_date=end_date,
+        use_event_triggers=use_events,
+    )
+
+    # ── Run time-varying backtest ─────────────────────────────────────────
+    print(f"\n  Running rebalanced backtest "
+          f"({start_date.strftime('%Y-%m-%d')} → {end_date.strftime('%Y-%m-%d')})...")
+    backtest_results = run_rebalanced_backtest(
+        weight_schedules=weight_schedule,
+        start_date=start_date,
+        end_date=end_date,
+        all_stock_codes=stock_codes,
+    )
+
+    # ── Generate PDF using final-quarter portfolio ────────────────────────
+    last_q       = quarterly_log[-1]
+    company_names = {
+        code: corp_infos[code]["corp_name"] for code in stock_codes
+    }
+
+    import anthropic as _ant
+    from config import ANTHROPIC_API_KEY, CLAUDE_MODEL
+    _claude_client = _ant.Anthropic(api_key=ANTHROPIC_API_KEY)
+
+    q_summary = "\n".join(
+        f"  Q{q['quarter']} ({q['start'].strftime('%Y-%m-%d')}): "
+        + ", ".join(
+            f"{code} → {q['portfolios']['risk-neutral']['stock_allocations'][code]['signal']}"
+            for code in stock_codes
+        )
+        for q in quarterly_log
+    )
+    narrative_prompt = (
+        f"You are writing a concise executive summary for a rebalanced portfolio report.\n"
+        f"Stocks: {', '.join(f'{c} ({n})' for c, n in company_names.items())}\n"
+        f"Rebalancing history:\n{q_summary}\n\n"
+        f"Write 4–5 sentences covering: (1) how signals evolved across quarters, "
+        f"(2) which stocks were consistently held vs rotated out, "
+        f"(3) the impact of event-triggered re-weighting, "
+        f"(4) the recommended posture going forward, "
+        f"(5) one key risk to watch."
+    )
+    try:
+        resp      = _claude_client.messages.create(
+            model=CLAUDE_MODEL, max_tokens=500,
+            messages=[{"role": "user", "content": narrative_prompt}]
+        )
+        narrative = resp.content[0].text.strip()
+    except Exception:
+        narrative = (
+            f"Rebalanced portfolio across {len(quarterly_log)} quarter(s). "
+            f"LLM narrative unavailable — check API key."
+        )
+
+    os.makedirs(REPORTS_DIR, exist_ok=True)
+    date_tag = start_date.strftime("%Y-%m-%d")
+    pdf_path = os.path.join(REPORTS_DIR, f"Exec Sum_Rebalanced_{date_tag}.pdf")
+
+    build_pdf(
+        pdf_path=pdf_path,
+        company_names=company_names,
+        portfolios=last_q["portfolios"],
+        narrative=narrative,
+        as_of_date=end_date,
+        backtest_results=backtest_results,
+    )
+
+    print(f"\n{'='*60}")
+    print(f"  REBALANCING COMPLETE")
+    print(f"  {len(quarterly_log)} quarter(s) analysed  |  "
+          f"{sum(len(v) for v in weight_schedule.values())} total weight events")
+    print(f"  PDF → {pdf_path}")
+    print(f"{'='*60}\n")
+
+
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 def main() -> None:
@@ -441,18 +595,23 @@ def main() -> None:
     print("\n  [N] New analysis        — fetch data, run agents, save signals")
     print("  [L] Load saved signals  — skip analysis, go straight to portfolio & backtest")
     print("  [C] Convert MD reports  — convert existing .md reports to signal JSON files")
+    print("  [R] Rebalancing         — quarterly LLM rebalance + event-triggered re-weighting")
 
     while True:
-        choice = input("\n  Choice (N / L / C): ").strip().upper()
-        if choice in ("N", "L", "C"):
+        choice = input("\n  Choice (N / L / C / R): ").strip().upper()
+        if choice in ("N", "L", "C", "R"):
             break
-        print("  Please enter N, L, or C.")
+        print("  Please enter N, L, C, or R.")
 
     if choice == "C":
         _convert_md_to_signals_flow()
         return
 
     orchestrator = OrchestratorAgent()
+
+    if choice == "R":
+        _rebalancing_flow(orchestrator)
+        return
 
     if choice == "L":
         all_results, as_of_date = _load_signals_flow()

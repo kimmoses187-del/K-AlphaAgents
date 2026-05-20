@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional
+from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 import yfinance as yf
@@ -122,6 +122,96 @@ def run_backtest(
     return {
         "risk-averse":    engines["risk-averse"],
         "risk-neutral":   engines["risk-neutral"],
+        "summaries":      summaries,
+        "kospi_cum":      kospi_cum,
+        "kospi_rolling":  kospi_rolling,
+        "kosdaq_cum":     kosdaq_cum,
+        "kosdaq_rolling": kosdaq_rolling,
+    }
+
+
+def run_rebalanced_backtest(
+    weight_schedules: Dict[str, List[Tuple]],
+    start_date: datetime,
+    end_date: datetime,
+    all_stock_codes: Optional[List[str]] = None,
+) -> dict:
+    """
+    Run a time-varying backtest for both risk profiles using rebalancing schedules.
+
+    Parameters
+    ----------
+    weight_schedules : {"risk-averse": [(date, weights), ...],
+                        "risk-neutral": [(date, weights), ...]}
+    start_date       : backtest start (= first quarterly analysis date)
+    end_date         : backtest end
+    all_stock_codes  : full stock pool for EW benchmark
+
+    Returns
+    -------
+    Same structure as run_backtest() — compatible with plot_two_profiles().
+    """
+    start_str = start_date.strftime("%Y-%m-%d")
+    end_str   = end_date.strftime("%Y-%m-%d")
+
+    engines   = {}
+    summaries = {}
+
+    for profile in ["risk-averse", "risk-neutral"]:
+        engine = BacktestEngine(
+            start_date=start_str,
+            end_date=end_str,
+            risk_free_rate=_RISK_FREE_RATE,
+            rolling_window=_ROLLING_WINDOW,
+            market="KRX",
+        )
+
+        # ── Rebalanced portfolio ─────────────────────────────────────────
+        schedule = weight_schedules.get(profile, [])
+        if not schedule:
+            print(f"  [WARNING] No weight schedule for {profile}, skipping.")
+            continue
+
+        ret  = engine.run_with_schedule(schedule)
+        cum  = engine.metrics.cumulative_return(ret)
+        roll = engine.metrics.rolling_sharpe(ret, _ROLLING_WINDOW)
+
+        engine.results["Rebalanced"] = {
+            "returns":           ret,
+            "cumulative_return": cum,
+            "rolling_sharpe":    roll,
+            "valid_weights":     {},
+        }
+
+        # ── EW benchmark (buy-and-hold equal weight all stocks) ──────────
+        if all_stock_codes:
+            ew_w        = {code: 1.0 / len(all_stock_codes) for code in all_stock_codes}
+            ew_schedule = [(start_date, ew_w)]
+            ew_ret      = engine.run_with_schedule(ew_schedule)
+            ew_cum      = engine.metrics.cumulative_return(ew_ret)
+            ew_roll     = engine.metrics.rolling_sharpe(ew_ret, _ROLLING_WINDOW)
+            engine.results["EW Benchmark"] = {
+                "returns":           ew_ret,
+                "cumulative_return": ew_cum,
+                "rolling_sharpe":    ew_roll,
+                "valid_weights":     ew_w,
+            }
+
+        engines[profile]   = engine
+        summaries[profile] = engine.metrics.summary(ret)
+        engine.print_summary()
+
+    # ── Korean index benchmarks ──────────────────────────────────────────
+    kospi_cum,  kospi_rolling  = _fetch_index("^KS11", "KOSPI",  start_str, end_str)
+    kosdaq_cum, kosdaq_rolling = _fetch_index("^KQ11", "KOSDAQ", start_str, end_str)
+
+    for label, series in [("KOSPI", kospi_cum), ("KOSDAQ", kosdaq_cum)]:
+        status = "fetched successfully" if series is not None else "unavailable"
+        print(f"  [{label}] Benchmark {status}.")
+
+    return {
+        "risk-averse":    engines.get("risk-averse"),
+        "risk-neutral":   engines.get("risk-neutral"),
         "summaries":      summaries,
         "kospi_cum":      kospi_cum,
         "kospi_rolling":  kospi_rolling,

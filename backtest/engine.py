@@ -219,6 +219,80 @@ class BacktestEngine:
             summaries[name] = self.metrics.summary(ret)
         return summaries
 
+    def run_with_schedule(
+        self,
+        weight_schedule: List[Tuple],
+    ) -> "pd.Series":
+        """
+        Run a time-varying backtest using a rebalancing weight schedule.
+
+        Parameters
+        ----------
+        weight_schedule : [(datetime, {ticker: weight}), ...] sorted ascending by date.
+                          Each entry represents a weight change effective from that date.
+
+        Returns
+        -------
+        pd.Series of daily portfolio returns over [self.start, self.end].
+        """
+        if not weight_schedule:
+            raise ValueError("weight_schedule is empty.")
+
+        # Collect all unique tickers across the entire schedule
+        all_tickers: set = set()
+        for _, w in weight_schedule:
+            all_tickers.update(w.keys())
+
+        self.prices = self.fetcher.fetch(list(all_tickers), self.start, self.end)
+
+        # Sort schedule ascending
+        schedule = sorted(weight_schedule, key=lambda x: x[0])
+
+        returns     = []
+        dates       = []
+        prev_row    = None
+
+        for i, date in enumerate(self.prices.index):
+            curr_row = self.prices.iloc[i]
+
+            if prev_row is None:
+                prev_row = curr_row
+                continue
+
+            # Find most recent applicable weights (latest entry with date <= today)
+            applicable_w = None
+            for sched_date, weights in reversed(schedule):
+                if pd.Timestamp(sched_date) <= date:
+                    applicable_w = weights
+                    break
+
+            if applicable_w is None:
+                returns.append(0.0)
+                dates.append(date)
+                prev_row = curr_row
+                continue
+
+            valid = {t: w for t, w in applicable_w.items()
+                     if t in self.prices.columns and w > 0}
+            total = sum(valid.values())
+            if total == 0:
+                returns.append(0.0)
+                dates.append(date)
+                prev_row = curr_row
+                continue
+
+            valid = {t: w / total for t, w in valid.items()}
+            day_ret = sum(
+                ((curr_row[t] / prev_row[t]) - 1) * w
+                for t, w in valid.items()
+                if t in curr_row.index and t in prev_row.index and prev_row[t] > 0
+            )
+            returns.append(day_ret)
+            dates.append(date)
+            prev_row = curr_row
+
+        return pd.Series(returns, index=dates, name="rebalanced_portfolio")
+
     def print_summary(self):
         names = [n for n in self.results if "returns" in self.results[n]]
         col_w = 20

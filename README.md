@@ -34,7 +34,31 @@ python3 main.py
         │
         ├── [L] Load Saved Signals   (skip analysis → go straight to portfolio & backtest)
         │
-        └── [C] Convert MD Reports   (convert existing .md files to _signals.json)
+        ├── [C] Convert MD Reports   (convert existing .md files to _signals.json)
+        │
+        └── [R] Rebalancing          (quarterly LLM rebalance + event-triggered re-weighting)
+                        │
+                        ├── Enter start date + end date
+                        ├── Enter stock pool
+                        ├── Enable / disable event triggers
+                        │
+                        ▼
+            ┌─────────────────────────────────────────────┐
+            │  RebalanceEngine                            │
+            │                                             │
+            │  For each quarter:                          │
+            │    1. Full 5-agent debate (LLM)             │
+            │    2. Construct portfolio → base weights     │
+            │    3. Monitor daily prices (no LLM):        │
+            │         • Price drop > 8% from entry        │
+            │         • 20d annualised vol > 40%          │
+            │         • Price below 20d MA × 3 days       │
+            │       → Re-weight via momentum scores       │
+            │                                             │
+            │  After all quarters:                        │
+            │    4. Time-varying backtest                  │
+            │    5. Executive Summary PDF                  │
+            └─────────────────────────────────────────────┘
 ```
 
 ---
@@ -187,8 +211,13 @@ alpha_agents/
 │
 ├── backtest/
 │   ├── engine.py                  # KRX data fetcher, metrics, BacktestEngine,
-│   │                              #   plot_two_profiles()
-│   └── runner.py                  # Runs both profiles + EW/S&P500 benchmarks
+│   │                              #   plot_two_profiles(), run_with_schedule()
+│   └── runner.py                  # Runs both profiles + EW/KOSPI/KOSDAQ benchmarks
+│
+├── rebalance/
+│   ├── rebalance_engine.py        # Quarterly LLM rebalance + intra-quarter monitoring
+│   ├── event_monitor.py           # Trigger detection (price drop / vol spike / MA flip)
+│   └── weight_adjuster.py         # Momentum-based re-weighting (no LLM)
 │
 ├── report/
 │   ├── report_generator.py        # Per-stock Markdown report generator

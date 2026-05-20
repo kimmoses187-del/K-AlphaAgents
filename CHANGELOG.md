@@ -5,6 +5,21 @@ Format: `[YYYY-MM-DD] — Summary`
 
 ---
 
+## [2026-05-20] — Add portfolio rebalancing ([R] mode)
+
+- New `rebalance/` module with three components:
+  - `rebalance_engine.py` — orchestrates quarterly LLM rebalance + intra-quarter event monitoring
+  - `event_monitor.py` — detects 3 triggers: price drop >8%, 20d vol >40%, price below 20d MA ×3 days
+  - `weight_adjuster.py` — redistributes equity weights via momentum scores without LLM calls
+- `backtest/engine.py` — added `run_with_schedule()` for time-varying weight backtest
+- `backtest/runner.py` — added `run_rebalanced_backtest()` for chained rebalancing periods
+- `main.py` — added `[R] Rebalancing` mode with full interactive flow
+- Quarterly rebalance: full 5-agent debate re-runs every 3 calendar months with fresh data
+- Event triggers: intra-quarter momentum-based re-weighting fires without any LLM calls
+- Output: `Exec Sum_Rebalanced_{start-date}.pdf` with final-quarter portfolio + backtest chart
+
+---
+
 ## [2026-05-03] — Remove min conviction threshold
 
 - All BUY stocks now qualify for equity allocation regardless of conviction score

@@ -562,12 +562,16 @@ def _load_rebalancing_backtest_flow(orchestrator: "OrchestratorAgent") -> None:
         except Exception:
             print(f"  [{i+1:>2}]  {os.path.basename(path)}  (unreadable)")
 
-    while True:
-        raw = input(f"\n  Select file (1–{len(files)}): ").strip()
-        if raw.isdigit() and 1 <= int(raw) <= len(files):
-            selected = files[int(raw) - 1]
-            break
-        print(f"  Please enter a number between 1 and {len(files)}.")
+    if len(files) == 1:
+        selected = files[0]
+        print(f"\n  Auto-selected: {os.path.basename(selected)}")
+    else:
+        while True:
+            raw = input(f"\n  Select file (1–{len(files)}): ").strip()
+            if raw.isdigit() and 1 <= int(raw) <= len(files):
+                selected = files[int(raw) - 1]
+                break
+            print(f"  Please enter a number between 1 and {len(files)}.")
 
     data          = _load_rebalancing_json(selected)
     start_date    = data["start_date"]

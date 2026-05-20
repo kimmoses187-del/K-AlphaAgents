@@ -78,6 +78,7 @@ class RebalanceEngine:
         start_date: datetime,
         end_date: datetime,
         use_event_triggers: bool = True,
+        initial_results: Optional[dict] = None,
     ) -> Tuple[Dict[str, list], List[dict]]:
         """
         Main entry point.
@@ -89,6 +90,9 @@ class RebalanceEngine:
         start_date         : first quarterly analysis date
         end_date           : backtest end date (no analysis beyond this)
         use_event_triggers : whether to run intra-quarter monitoring
+        initial_results    : pre-computed Q1 all_results from [N]/[L] analysis.
+                             If provided, Q1 LLM debate is skipped — subsequent
+                             quarters still re-run the full 5-agent debate.
 
         Returns
         -------
@@ -106,6 +110,8 @@ class RebalanceEngine:
               f"{start_date.strftime('%Y-%m-%d')} → {end_date.strftime('%Y-%m-%d')}")
         print(f"  Stocks : {', '.join(stock_codes)}")
         print(f"  Event triggers: {'ON' if use_event_triggers else 'OFF'}")
+        if initial_results:
+            print(f"  Q1 analysis reused from prior session (no LLM re-run).")
         print(f"{'='*60}")
 
         for q_num, (q_start, q_end) in enumerate(quarters, 1):
@@ -114,10 +120,19 @@ class RebalanceEngine:
                   f"{q_start.strftime('%Y-%m-%d')} → {q_end.strftime('%Y-%m-%d')}")
             print(f"{'─'*60}")
 
-            # ── Quarterly LLM rebalance ───────────────────────────────────
-            all_results, portfolios = self._run_quarter_analysis(
-                stock_codes, corp_infos, q_start
-            )
+            # ── Quarterly LLM rebalance (Q1 may be reused) ───────────────
+            if q_num == 1 and initial_results is not None:
+                print("  [Q1] Reusing prior analysis — skipping LLM debate.")
+                all_results = initial_results
+                stock_debate_results = {
+                    code: r["debate_results"] for code, r in all_results.items()
+                }
+                from portfolio.portfolio_agent import construct_portfolio
+                portfolios = construct_portfolio(stock_debate_results)
+            else:
+                all_results, portfolios = self._run_quarter_analysis(
+                    stock_codes, corp_infos, q_start
+                )
 
             # Quarter-start weights → schedule
             for profile in PROFILES:

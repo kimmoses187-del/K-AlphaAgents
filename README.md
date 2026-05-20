@@ -32,32 +32,36 @@ python3 main.py
         │   │    6. SummaryRenderer → PDF               │
         │   └───────────────────────────────────────────┘
         │
-        ├── [L] Load Saved Signals   (skip analysis → go straight to portfolio & backtest)
+        ├── [L] Load Saved Signals   (skip analysis → choose backtest mode)
         │
-        ├── [C] Convert MD Reports   (convert existing .md files to _signals.json)
+        └── [C] Convert MD Reports   (convert existing .md files to _signals.json)
+        │
+        After [N] or [L] completes, the system asks:
+        │
+        ├── [S] Standard Backtest    (static portfolio, single as-of date)
+        │       Benchmarks: EW buy-and-hold · KOSPI · KOSDAQ
         │
         └── [R] Rebalancing          (quarterly LLM rebalance + event-triggered re-weighting)
-                        │
-                        ├── Enter start date + end date
-                        ├── Enter stock pool
-                        ├── Enable / disable event triggers
+                        │             Benchmarks: EW buy-and-hold · KOSPI · KOSDAQ
                         │
                         ▼
             ┌─────────────────────────────────────────────┐
             │  RebalanceEngine                            │
             │                                             │
-            │  For each quarter:                          │
-            │    1. Full 5-agent debate (LLM)             │
-            │    2. Construct portfolio → base weights     │
-            │    3. Monitor daily prices (no LLM):        │
+            │  Q1: reuses [N]/[L] analysis (no LLM redo) │
+            │  Q2+: full 5-agent debate with fresh data   │
+            │                                             │
+            │  Each quarter:                              │
+            │    1. Construct portfolio → base weights     │
+            │    2. Monitor daily prices (no LLM):        │
             │         • Price drop > 8% from entry        │
             │         • 20d annualised vol > 40%          │
             │         • Price below 20d MA × 3 days       │
             │       → Re-weight via momentum scores       │
             │                                             │
             │  After all quarters:                        │
-            │    4. Time-varying backtest                  │
-            │    5. Executive Summary PDF                  │
+            │    3. Time-varying backtest                  │
+            │    4. Executive Summary PDF                  │
             └─────────────────────────────────────────────┘
 ```
 

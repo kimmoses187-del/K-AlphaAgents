@@ -9,8 +9,8 @@ Run:
 Then open:  http://localhost:5001
 """
 
-import eventlet
-eventlet.monkey_patch()
+from gevent import monkey
+monkey.patch_all()
 
 import os
 import sys
@@ -26,7 +26,7 @@ from web.runner  import run_web_session
 
 app       = Flask(__name__, template_folder="../templates")
 app.config["SECRET_KEY"] = "kalpha-agents-2026"
-socketio  = SocketIO(app, async_mode="eventlet", cors_allowed_origins="*")
+socketio  = SocketIO(app, async_mode="gevent", cors_allowed_origins="*")
 
 _sessions: dict[str, WebSession] = {}
 
@@ -63,7 +63,8 @@ def on_input(data):
 
 
 if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 5001))
     print("\n  K-AlphaAgents Web UI")
     print("  ─────────────────────────────")
-    print("  Open: http://localhost:5001\n")
-    socketio.run(app, host="0.0.0.0", port=5001, debug=False)
+    print(f"  Open: http://localhost:{port}\n")
+    socketio.run(app, host="0.0.0.0", port=port, debug=False)

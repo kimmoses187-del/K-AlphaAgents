@@ -1,0 +1,33 @@
+services:
+  - type: web
+    name: k-alpha-agents
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn --worker-class geventwebsocket.gunicorn.workers.GeventWebSocketWorker -w 1 --bind 0.0.0.0:$PORT web.app:app
+    plan: free
+
+    # ── Environment variables ─────────────────────────────────────────────────
+    # Set the secret keys in the Render dashboard (not here).
+    # The entries below just declare which env vars the app needs.
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.0"
+
+      # ── API keys — set values in Render dashboard ─────────────────────────
+      - key: ANTHROPIC_API_KEY
+        sync: false          # marks as secret; must be set manually in dashboard
+
+      - key: OPENAI_API_KEY
+        sync: false
+
+      - key: DART_API_KEY
+        sync: false
+
+      # ── Optional overrides ────────────────────────────────────────────────
+      # Uncomment to use a cheaper model on the hosted instance:
+      # - key: CLAUDE_MODEL
+      #   value: claude-haiku-4-5
+
+      # Uncomment to run in debug mode (no LLM calls, useful for testing UI):
+      # - key: DEBUG_MODE
+      #   value: "true"

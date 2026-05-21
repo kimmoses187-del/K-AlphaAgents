@@ -5,6 +5,67 @@ Format: `[YYYY-MM-DD] — Summary`
 
 ---
 
+## [2026-05-21] — Risk profile overhaul: prompt framework + signal extraction
+
+### 1. `extract_signal()` — fixed for both profiles (`agents/base_agent.py`)
+
+**Problem:**
+The old implementation scanned every line of the LLM response from the bottom up, returning the first line that contained the word BUY or SELL *anywhere* in the text. This caused false matches from normal English phrases in the body of the analysis:
+- `"risk of a SELL-off"` → incorrectly returned SELL
+- `"not a BUY signal at this level"` → incorrectly returned BUY
+- `"avoid the urge to SELL prematurely"` → incorrectly returned SELL
+
+Since every agent is explicitly prompted to end with `RECOMMENDATION: BUY` or `RECOMMENDATION: SELL`, the scanner was regularly picking up the wrong sentence before reaching that line, producing arbitrary signals disconnected from the agent's actual conclusion.
+
+**Fix:**
+```python
+import re
+match = re.search(r"RECOMMENDATION:\s*(BUY|SELL)", text, re.IGNORECASE)
+if match:
+    return match.group(1).upper()
+return "SELL" if risk_profile == "risk-averse" else "BUY"
+```
+The function now targets only the `RECOMMENDATION:` line the agents are instructed to write. The profile-default fallback only triggers if the agent failed to write that line at all.
+
+---
+
+### 2. Risk profile prompt framework — all 5 agents (`agents/*.py`)
+
+**Problem:**
+The old prompts conflated *risk-averse* with *permanently bearish*. Every agent's risk-averse prompt contained an explicit fallback instruction such as:
+- `"When in doubt, SELL"` (FundamentalAgent)
+- `"Mixed or uncertain picture → lean SELL"` (SentimentAgent)
+- `"When signals are mixed or ambiguous → default to SELL"` (TechnicalAgent)
+- `"When industry outlook is uncertain → lean SELL"` (MarketAgent)
+- `"In macro uncertainty, lean SELL"` (MacroAgent)
+
+In practice, real-world data is almost always mixed — some indicators positive, some negative. This meant every agent's "when in doubt" fallback fired on nearly every stock, producing unanimous SELL regardless of actual company quality. The prompts were also telling agents to *look for* negative signals rather than *weigh* them differently, causing information bias at the observation stage.
+
+**Why this was wrong:**
+Risk-averse and risk-neutral are defined by how an investor *weights* risk versus return in their final judgment — not by what they look for in the data. A risk-averse investor still reads all available information; they simply give more weight to potential losses than potential gains when making their decision.
+
+**Fix — two-step structure applied to all 5 agents × 2 profiles:**
+
+```
+Step 1 — Read all data objectively:
+  Both profiles analyse the full dataset without filtering or dismissing
+  any signal. Observation is identical and profile-agnostic.
+
+Step 2 — Apply the profile lens to the final judgment:
+  Risk-averse:  when risks and returns are of similar magnitude, risk wins → lean SELL
+  Risk-neutral: when risks and returns are of similar magnitude, return wins → lean BUY
+```
+
+This means:
+- Risk-averse agents can and will recommend BUY — when the return case clearly outweighs the risk
+- Risk-neutral agents can and will recommend SELL — when risks clearly dominate
+- The profiles produce a genuine spectrum rather than a fixed binary outcome
+- No information is filtered at the observation stage; the difference is entirely in the final weighting
+
+**Files changed:** `agents/fundamental_agent.py`, `agents/sentiment_agent.py`, `agents/technical_agent.py`, `agents/market_agent.py`, `agents/macro_agent.py`
+
+---
+
 ## [2026-05-21] — Remove legacy "Convert MD Reports" option
 
 - `main.py` + `web/runner.py` — removed the `[C] Convert MD Reports` menu option from both terminal and web UI startup

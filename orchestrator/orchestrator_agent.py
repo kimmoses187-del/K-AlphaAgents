@@ -88,10 +88,17 @@ class OrchestratorAgent:
                                           stage=stage, progress_cb=progress_cb)
         debate_results = self._run_debates(company_name, data, progress_cb=progress_cb)
 
-        # Per-stock markdown reports (no portfolio weights yet)
-        os.makedirs(REPORTS_DIR, exist_ok=True)
-        safe_name    = _safe_filename(company_name)
-        date_tag     = as_of_date.strftime("%Y-%m-%d")
+        # ── Output paths ──────────────────────────────────────────────────────
+        # Structure: reports/{run_date}/{ticker}_{name}/{ticker}_{name}_{analysis_date}.*
+        safe_name = _safe_filename(company_name)
+        date_tag  = as_of_date.strftime("%Y-%m-%d")
+        run_date  = datetime.now().strftime("%Y-%m-%d")
+        base_name = f"{stock_code}_{safe_name}_{date_tag}"
+
+        stock_dir = os.path.join(REPORTS_DIR, run_date, f"{stock_code}_{safe_name}")
+        os.makedirs(stock_dir, exist_ok=True)
+
+        # Per-stock markdown reports
         report_files = {}
         for profile in PROFILES:
             report_md = generate_report(
@@ -101,9 +108,7 @@ class OrchestratorAgent:
                 as_of_date=as_of_date,
             )
             tag      = "averse" if profile == "risk-averse" else "neutral"
-            filename = os.path.join(
-                REPORTS_DIR, f"{stock_code}_{safe_name}_{date_tag}_{tag}.md"
-            )
+            filename = os.path.join(stock_dir, f"{base_name}_{tag}.md")
             with open(filename, "w", encoding="utf-8") as f:
                 f.write(report_md)
             report_files[profile] = filename
@@ -119,10 +124,8 @@ class OrchestratorAgent:
         for profile, path in report_files.items():
             print(f"  Report [{profile}]: {path}")
 
-        # Save signals to JSON so this stock can be reloaded without re-analysis
-        signals_path = os.path.join(
-            REPORTS_DIR, f"{stock_code}_{safe_name}_{date_tag}_signals.json"
-        )
+        # Save signals to JSON (auto-generated — no manual conversion needed)
+        signals_path = os.path.join(stock_dir, f"{base_name}.json")
         with open(signals_path, "w", encoding="utf-8") as f:
             json.dump({
                 "stock_code":     stock_code,
@@ -194,7 +197,10 @@ class OrchestratorAgent:
 
         date_tag  = as_of_date.strftime("%Y-%m-%d")
         stock_tag = "_".join(all_results.keys())
-        pdf_path  = os.path.join(REPORTS_DIR, f"Exec Sum_{date_tag}.pdf")
+        run_date  = datetime.now().strftime("%Y-%m-%d")
+        run_dir   = os.path.join(REPORTS_DIR, run_date)
+        os.makedirs(run_dir, exist_ok=True)
+        pdf_path  = os.path.join(run_dir, f"Exec_Sum_{date_tag}.pdf")
 
         if not any_equity:
             print("\n  No stocks were recommended for purchase by either profile.")
@@ -255,6 +261,7 @@ class OrchestratorAgent:
                 print(f"  {path}")
         print(f"  PDF → {pdf_path}")
         print(f"{'='*60}\n")
+        return pdf_path
 
     # ── Private helpers ───────────────────────────────────────────────────────
 

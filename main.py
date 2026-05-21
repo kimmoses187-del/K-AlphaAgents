@@ -23,8 +23,12 @@ def _ask_date(prompt: str) -> datetime:
 # ── Load-saved-signals flow ───────────────────────────────────────────────────
 
 def _list_signal_files() -> list[str]:
-    """Return sorted list of *signals*.json files in the reports folder."""
-    return sorted(glob.glob(os.path.join(REPORTS_DIR, "*signals*.json")))
+    """
+    Return sorted list of signal JSON files.
+    New structure: reports/{run_date}/{ticker_name}/{ticker_name_date}.json
+    (2 levels deep — excludes Rebalanced_*.json which sit at root level)
+    """
+    return sorted(glob.glob(os.path.join(REPORTS_DIR, "*", "*", "*.json")))
 
 
 def _load_signals_flow() -> tuple[dict, datetime]:
@@ -236,7 +240,7 @@ def _find_md_pairs() -> list[dict]:
     Scan REPORTS_DIR for *_averse_*.md + matching *_neutral_*.md pairs.
     Returns a list of dicts: {stock_code, timestamp, averse_path, neutral_path}.
     """
-    averse_files = glob.glob(os.path.join(REPORTS_DIR, "*_averse*.md"))
+    averse_files = glob.glob(os.path.join(REPORTS_DIR, "**", "*_averse.md"), recursive=True)
     pairs = []
     seen = set()
     for averse in sorted(averse_files):
@@ -356,10 +360,9 @@ def _convert_md_to_signals_flow() -> None:
             "corp_code":  "",            # not needed by finalize()
         }
 
-        signals_path = os.path.join(
-            REPORTS_DIR,
-            f"{p['stock_code']}_{safe_name}_{date_tag}_signals.json"
-        )
+        # Save JSON next to the MD files (same directory)
+        md_dir       = os.path.dirname(p["averse_path"])
+        signals_path = os.path.join(md_dir, f"{p['stock_code']}_{safe_name}_{date_tag}.json")
         payload = {
             "stock_code":     p["stock_code"],
             "company_name":   company_name,

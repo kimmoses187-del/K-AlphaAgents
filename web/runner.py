@@ -20,7 +20,8 @@ REPORTS_DIR = "reports"
 
 
 def _list_signal_files():
-    return sorted(glob.glob(os.path.join(REPORTS_DIR, "*signals*.json")))
+    # Signal JSONs live 2 levels deep: reports/{run_date}/{ticker_name}/*.json
+    return sorted(glob.glob(os.path.join(REPORTS_DIR, "*", "*", "*.json")))
 
 
 def _list_rebalancing_files():
@@ -150,9 +151,9 @@ def _new_analysis_flow(session, orchestrator):
                 "consensus":  dr["consensus_type"],
                 "rounds":     dr["consensus_round"],
             })
-        # Find the signals JSON saved by orchestrator
+        # Find the signals JSON saved by orchestrator (2 levels deep)
         date_tag = as_of_date.strftime("%Y-%m-%d")
-        pattern  = os.path.join(REPORTS_DIR, f"{stock_code}_*{date_tag}_signals.json")
+        pattern  = os.path.join(REPORTS_DIR, "*", f"{stock_code}_*", f"{stock_code}_*{date_tag}.json")
         matches  = sorted(glob.glob(pattern))
         signal_file = matches[-1] if matches else ""
 
@@ -291,12 +292,11 @@ def _standard_backtest(session, orchestrator, all_results, as_of_date):
         subtext=f"{as_of_date.strftime('%Y-%m-%d')} → {end_date.strftime('%Y-%m-%d')}",
     )
     try:
-        orchestrator.finalize(all_results, as_of_date,
-                              end_date_override=end_date,
-                              progress_cb=session.progress)
-        pdf = f"reports/Exec Sum_{as_of_date.strftime('%Y-%m-%d')}.pdf"
-        session.message("✅ Complete — PDF generated", msg_type="success", subtext=pdf)
-        session.done(pdf_path=pdf)
+        pdf = orchestrator.finalize(all_results, as_of_date,
+                                    end_date_override=end_date,
+                                    progress_cb=session.progress)
+        session.message("✅ Complete — PDF generated", msg_type="success", subtext=pdf or "")
+        session.done(pdf_path=pdf or "")
     except Exception as e:
         session.message(f"❌ Error: {e}", msg_type="error")
         session.done()

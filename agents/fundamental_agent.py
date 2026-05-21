@@ -53,14 +53,13 @@ class FundamentalAgent(BaseAgent):
         self.risk_profile = risk_profile
 
     def analyze(self, fundamental_data: str, company_name: str) -> dict:
-        prompt = f"""Perform a comprehensive fundamental analysis of **{company_name}**.
-
-{fundamental_data}
+        cached  = fundamental_data
+        dynamic = f"""Perform a comprehensive fundamental analysis of **{company_name}**.
 
 Analyse financial health, business performance, and risks consistent with your risk profile.
 End your response with:
 RECOMMENDATION: BUY  or  RECOMMENDATION: SELL"""
-        analysis = self.call_llm(prompt)
+        analysis = self.call_llm_with_cache(cached, dynamic)
         return {"agent": self.name, "analysis": analysis, "signal": self.extract_signal(analysis, self.risk_profile)}
 
     def update_position(self, fundamental_data: str, company_name: str,
@@ -69,7 +68,8 @@ RECOMMENDATION: BUY  or  RECOMMENDATION: SELL"""
             f"### {p['agent']} (Signal: {p['signal']})\n{p['analysis']}"
             for p in peer_analyses
         )
-        prompt = f"""You have already analysed **{company_name}** from a fundamental perspective.
+        cached  = fundamental_data
+        dynamic = f"""You have already analysed **{company_name}** from a fundamental perspective.
 
 Now review your peers' analyses below and decide whether to maintain or revise your recommendation.
 
@@ -77,12 +77,8 @@ Now review your peers' analyses below and decide whether to maintain or revise y
 {peer_block}
 === END PEER ANALYSES ===
 
-=== YOUR FUNDAMENTAL DATA ===
-{fundamental_data}
-=== END DATA ===
-
 Debate Round {round_num}: State clearly whether you are MAINTAINING or CHANGING your position and why.
 End your response with:
 RECOMMENDATION: BUY  or  RECOMMENDATION: SELL"""
-        analysis = self.call_llm(prompt)
+        analysis = self.call_llm_with_cache(cached, dynamic)
         return {"agent": self.name, "analysis": analysis, "signal": self.extract_signal(analysis, self.risk_profile)}

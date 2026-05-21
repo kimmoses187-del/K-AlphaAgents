@@ -54,14 +54,13 @@ class MarketAgent(BaseAgent):
         self.risk_profile = risk_profile
 
     def analyze(self, market_data: str, company_name: str) -> dict:
-        prompt = f"""Perform a comprehensive market and industry analysis for **{company_name}**.
-
-{market_data}
+        cached  = market_data
+        dynamic = f"""Perform a comprehensive market and industry analysis for **{company_name}**.
 
 Using the sector classification, peer comparison, and benchmark data above — combined with your knowledge of current industry trends, competitive dynamics, and sector-specific consulting insights — assess the industry landscape and its implications for this company.
 End your response with:
 RECOMMENDATION: BUY  or  RECOMMENDATION: SELL"""
-        analysis = self.call_llm(prompt)
+        analysis = self.call_llm_with_cache(cached, dynamic)
         return {"agent": self.name, "analysis": analysis, "signal": self.extract_signal(analysis, self.risk_profile)}
 
     def update_position(self, market_data: str, company_name: str,
@@ -70,7 +69,8 @@ RECOMMENDATION: BUY  or  RECOMMENDATION: SELL"""
             f"### {p['agent']} (Signal: {p['signal']})\n{p['analysis']}"
             for p in peer_analyses
         )
-        prompt = f"""You have already analysed **{company_name}** from a market and industry perspective.
+        cached  = market_data
+        dynamic = f"""You have already analysed **{company_name}** from a market and industry perspective.
 
 Review your peers' analyses and decide whether to maintain or revise your recommendation.
 
@@ -78,12 +78,8 @@ Review your peers' analyses and decide whether to maintain or revise your recomm
 {peer_block}
 === END PEER ANALYSES ===
 
-=== YOUR MARKET & INDUSTRY DATA ===
-{market_data}
-=== END DATA ===
-
 Debate Round {round_num}: State clearly whether you are MAINTAINING or CHANGING your position and why.
 End your response with:
 RECOMMENDATION: BUY  or  RECOMMENDATION: SELL"""
-        analysis = self.call_llm(prompt)
+        analysis = self.call_llm_with_cache(cached, dynamic)
         return {"agent": self.name, "analysis": analysis, "signal": self.extract_signal(analysis, self.risk_profile)}

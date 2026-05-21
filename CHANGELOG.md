@@ -5,6 +5,26 @@ Format: `[YYYY-MM-DD] — Summary`
 
 ---
 
+## [2026-05-21] — Prompt caching (Tier 2): data blobs cached across debate rounds
+
+### What changed
+- `agents/base_agent.py` — added `call_llm_with_cache(cached_data, dynamic_prompt)`
+  - Sends the user message as two separate content blocks
+  - Block 1: agent's data blob with `cache_control: ephemeral` — cached after Round 0
+  - Block 2: task instruction + peer analyses — always fresh, never cached
+  - OpenAI fallback combines both blocks into a single message (no caching)
+- All 5 agents (`FundamentalAgent`, `SentimentAgent`, `TechnicalAgent`, `MarketAgent`, `MacroAgent`)
+  - `analyze()` and `update_position()` now split into `cached = <data>` and `dynamic = <instructions>`
+  - Both call `call_llm_with_cache()` instead of `call_llm()`
+  - The data string (`fundamental_data`, `sentiment_data`, etc.) is byte-for-byte identical across all rounds → Round 0 writes cache, Rounds 1–3 read it
+
+### Why
+- Each agent's own data (DART financials, pykrx metrics, macro indicators, etc.) is re-sent on every debate round even though it never changes between rounds
+- Biggest winner: FundamentalAgent — DART financial reports can be 3,000–6,000 tokens, resent up to 8× per stock (4 rounds × 2 profiles)
+- Combined with Tier 1 (system prompt caching), the only tokens paid at full price per call are the dynamic parts: company name, peer analyses block, round number
+
+---
+
 ## [2026-05-21] — Prompt caching (Tier 1): system prompts + debate instructions
 
 ### What changed

@@ -60,17 +60,14 @@ class SentimentAgent(BaseAgent):
         self.risk_profile = risk_profile
 
     def analyze(self, sentiment_data: str, company_name: str) -> dict:
-        prompt = f"""Perform a comprehensive sentiment analysis for **{company_name}**.
-
-=== SENTIMENT DATA (DART + pykrx) ===
-{sentiment_data}
-=== END DATA ===
+        cached  = sentiment_data
+        dynamic = f"""Perform a comprehensive sentiment analysis for **{company_name}**.
 
 Analyse signals from all three sources (D: disclosures, E: investor flow, F: short selling)
 consistent with your risk profile.
 End your response with:
 RECOMMENDATION: BUY  or  RECOMMENDATION: SELL"""
-        analysis = self.call_llm(prompt)
+        analysis = self.call_llm_with_cache(cached, dynamic)
         return {"agent": self.name, "analysis": analysis, "signal": self.extract_signal(analysis, self.risk_profile)}
 
     def update_position(self, sentiment_data: str, company_name: str,
@@ -79,7 +76,8 @@ RECOMMENDATION: BUY  or  RECOMMENDATION: SELL"""
             f"### {p['agent']} (Signal: {p['signal']})\n{p['analysis']}"
             for p in peer_analyses
         )
-        prompt = f"""You have already analysed **{company_name}** from a sentiment perspective (DART disclosures, investor flow, short selling).
+        cached  = sentiment_data
+        dynamic = f"""You have already analysed **{company_name}** from a sentiment perspective (DART disclosures, investor flow, short selling).
 
 Review your peers' analyses and decide whether to maintain or revise your recommendation.
 
@@ -87,12 +85,8 @@ Review your peers' analyses and decide whether to maintain or revise your recomm
 {peer_block}
 === END PEER ANALYSES ===
 
-=== YOUR SENTIMENT DATA ===
-{sentiment_data}
-=== END DATA ===
-
 Debate Round {round_num}: State clearly whether you are MAINTAINING or CHANGING your position and why.
 End your response with:
 RECOMMENDATION: BUY  or  RECOMMENDATION: SELL"""
-        analysis = self.call_llm(prompt)
+        analysis = self.call_llm_with_cache(cached, dynamic)
         return {"agent": self.name, "analysis": analysis, "signal": self.extract_signal(analysis, self.risk_profile)}

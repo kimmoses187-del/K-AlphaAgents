@@ -53,7 +53,7 @@ class BaseAgent:
                 system=[{
                     "type": "text",
                     "text": self.system_prompt,
-                    "cache_control": {"type": "ephemeral"},  # cache across debate rounds
+                    "cache_control": {"type": "ephemeral"},
                 }],
                 messages=[{"role": "user", "content": user_message}],
             )
@@ -67,6 +67,58 @@ class BaseAgent:
                     messages=[
                         {"role": "system", "content": self.system_prompt},
                         {"role": "user", "content": user_message},
+                    ],
+                )
+                return resp.choices[0].message.content
+            except Exception as oai_err:
+                raise RuntimeError(
+                    f"Both LLMs failed for [{self.name}].\n"
+                    f"  Claude: {claude_err}\n  OpenAI: {oai_err}"
+                )
+
+    def call_llm_with_cache(self, cached_data: str, dynamic_prompt: str,
+                            max_tokens: int = 2048) -> str:
+        """
+        Tier 2 caching: send the user message as two content blocks.
+
+          Block 1 — cached_data    : the agent's data blob (identical every round) → cached
+          Block 2 — dynamic_prompt : task instruction + peer analyses (changes)    → not cached
+
+        The data block is placed first so it forms a stable prefix that Anthropic
+        can recognise and serve from cache on Rounds 1-3 after Round 0 writes it.
+        Falls back to OpenAI with a combined single message (no caching).
+        """
+        try:
+            resp = _claude.messages.create(
+                model=CLAUDE_MODEL,
+                max_tokens=max_tokens,
+                system=[{
+                    "type": "text",
+                    "text": self.system_prompt,
+                    "cache_control": {"type": "ephemeral"},
+                }],
+                messages=[{"role": "user", "content": [
+                    {
+                        "type": "text",
+                        "text": cached_data,
+                        "cache_control": {"type": "ephemeral"},  # ← data cached here
+                    },
+                    {
+                        "type": "text",
+                        "text": dynamic_prompt,                   # ← instructions, not cached
+                    },
+                ]}],
+            )
+            return resp.content[0].text
+        except Exception as claude_err:
+            print(f"  [{self.name}] Claude failed ({type(claude_err).__name__}), falling back to OpenAI...")
+            try:
+                resp = _openai.chat.completions.create(
+                    model=OPENAI_MODEL,
+                    max_tokens=max_tokens,
+                    messages=[
+                        {"role": "system", "content": self.system_prompt},
+                        {"role": "user", "content": cached_data + "\n\n" + dynamic_prompt},
                     ],
                 )
                 return resp.choices[0].message.content

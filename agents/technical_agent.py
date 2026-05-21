@@ -13,7 +13,7 @@ Replaces the former ValuationAgent. Data inputs extended to include:
 Data source: pykrx (KRX authoritative data) via tools/pykrx_tools.py
 """
 
-from agents.base_agent import BaseAgent, STEELMAN_INSTRUCTION, CHALLENGE_INSTRUCTION
+from agents.base_agent import BaseAgent
 
 _SYSTEMS = {
     "risk-averse": """You are a risk-averse technical equity analyst specialising in Korean equities (KOSPI/KOSDAQ).
@@ -78,7 +78,6 @@ class TechnicalAgent(BaseAgent):
 
 Analyse the price trend, momentum indicators (RSI, Bollinger Bands, moving averages),
 relative performance vs benchmarks, and QoQ momentum shift.
-{STEELMAN_INSTRUCTION}
 End your response with:
 RECOMMENDATION: BUY  or  RECOMMENDATION: SELL"""
         analysis = self.call_llm(prompt)
@@ -107,7 +106,6 @@ Review your peers' analyses and decide whether to maintain or revise your recomm
 === END DATA ===
 
 Debate Round {round_num}: State clearly whether you are MAINTAINING or CHANGING your position and why.
-{CHALLENGE_INSTRUCTION}
 End your response with:
 RECOMMENDATION: BUY  or  RECOMMENDATION: SELL"""
         analysis = self.call_llm(prompt)

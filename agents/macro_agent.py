@@ -1,4 +1,4 @@
-from agents.base_agent import BaseAgent, STEELMAN_INSTRUCTION, CHALLENGE_INSTRUCTION
+from agents.base_agent import BaseAgent
 
 _SYSTEMS = {
     "risk-averse": """You are a risk-averse macroeconomic analyst specialising in Korean equities (KOSPI/KOSDAQ).
@@ -57,7 +57,6 @@ class MacroAgent(BaseAgent):
 {macro_data}
 
 Using the macro indicators above — combined with your knowledge of the Bank of Korea monetary policy, Korea's export-driven economy, and current global economic conditions — assess the macro environment and its implications for this company.
-{STEELMAN_INSTRUCTION}
 End your response with:
 RECOMMENDATION: BUY  or  RECOMMENDATION: SELL"""
         analysis = self.call_llm(prompt)
@@ -82,7 +81,6 @@ Review your peers' analyses and decide whether to maintain or revise your recomm
 === END DATA ===
 
 Debate Round {round_num}: State clearly whether you are MAINTAINING or CHANGING your position and why.
-{CHALLENGE_INSTRUCTION}
 End your response with:
 RECOMMENDATION: BUY  or  RECOMMENDATION: SELL"""
         analysis = self.call_llm(prompt)

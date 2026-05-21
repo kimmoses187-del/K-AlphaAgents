@@ -1,4 +1,4 @@
-from agents.base_agent import BaseAgent, STEELMAN_INSTRUCTION, CHALLENGE_INSTRUCTION
+from agents.base_agent import BaseAgent
 
 _SYSTEMS = {
     "risk-averse": """You are a risk-averse fundamental equity analyst specialising in Korean equities (KOSPI/KOSDAQ).
@@ -58,7 +58,6 @@ class FundamentalAgent(BaseAgent):
 {fundamental_data}
 
 Analyse financial health, business performance, and risks consistent with your risk profile.
-{STEELMAN_INSTRUCTION}
 End your response with:
 RECOMMENDATION: BUY  or  RECOMMENDATION: SELL"""
         analysis = self.call_llm(prompt)
@@ -83,7 +82,6 @@ Now review your peers' analyses below and decide whether to maintain or revise y
 === END DATA ===
 
 Debate Round {round_num}: State clearly whether you are MAINTAINING or CHANGING your position and why.
-{CHALLENGE_INSTRUCTION}
 End your response with:
 RECOMMENDATION: BUY  or  RECOMMENDATION: SELL"""
         analysis = self.call_llm(prompt)

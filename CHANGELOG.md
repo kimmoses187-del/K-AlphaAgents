@@ -5,6 +5,26 @@ Format: `[YYYY-MM-DD] — Summary`
 
 ---
 
+## [2026-05-21] — Prompt caching (Tier 1): system prompts + debate instructions
+
+### What changed
+- `agents/base_agent.py`
+  - `call_llm()` now passes `system` as a list with `cache_control: ephemeral` so Anthropic caches the full system prompt across debate rounds
+  - Added `_DEBATE_APPENDIX` — a single block containing both `STEELMAN_INSTRUCTION` and `CHALLENGE_INSTRUCTION`, appended to `self.system_prompt` in `BaseAgent.__init__`
+  - `STEELMAN_INSTRUCTION` and `CHALLENGE_INSTRUCTION` are retained as module-level constants for reference but are no longer injected into user messages
+- All 5 active agents (`FundamentalAgent`, `SentimentAgent`, `TechnicalAgent`, `MarketAgent`, `MacroAgent`)
+  - Removed `{STEELMAN_INSTRUCTION}` from every `analyze()` user prompt
+  - Removed `{CHALLENGE_INSTRUCTION}` from every `update_position()` user prompt
+  - Import changed from `BaseAgent, STEELMAN_INSTRUCTION, CHALLENGE_INSTRUCTION` → `BaseAgent`
+
+### Why
+- System prompt + debate instructions are identical across all debate rounds (Round 0–3) for the same agent and risk profile
+- Caching them reduces input token cost by ~90% for those tokens on every call after the first
+- Per stock (2 profiles × up to 4 rounds × 5 agents = 40 calls): 1 cache write + 39 cache reads instead of 40 full reads
+- Estimated ~80% reduction in system-prompt-related input token spend
+
+---
+
 ## [2026-05-20] — Upgrade SentimentAgent: DART disclosures + pykrx investor flow + short selling
 
 ### Problem

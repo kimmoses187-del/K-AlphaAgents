@@ -1,4 +1,4 @@
-from agents.base_agent import BaseAgent, STEELMAN_INSTRUCTION, CHALLENGE_INSTRUCTION
+from agents.base_agent import BaseAgent
 
 _SYSTEMS = {
     "risk-averse": """You are a risk-averse market and industry analyst specialising in Korean equities (KOSPI/KOSDAQ).
@@ -59,7 +59,6 @@ class MarketAgent(BaseAgent):
 {market_data}
 
 Using the sector classification, peer comparison, and benchmark data above — combined with your knowledge of current industry trends, competitive dynamics, and sector-specific consulting insights — assess the industry landscape and its implications for this company.
-{STEELMAN_INSTRUCTION}
 End your response with:
 RECOMMENDATION: BUY  or  RECOMMENDATION: SELL"""
         analysis = self.call_llm(prompt)
@@ -84,7 +83,6 @@ Review your peers' analyses and decide whether to maintain or revise your recomm
 === END DATA ===
 
 Debate Round {round_num}: State clearly whether you are MAINTAINING or CHANGING your position and why.
-{CHALLENGE_INSTRUCTION}
 End your response with:
 RECOMMENDATION: BUY  or  RECOMMENDATION: SELL"""
         analysis = self.call_llm(prompt)

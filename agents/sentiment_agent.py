@@ -1,4 +1,4 @@
-from agents.base_agent import BaseAgent, STEELMAN_INSTRUCTION, CHALLENGE_INSTRUCTION
+from agents.base_agent import BaseAgent
 
 _SYSTEMS = {
     "risk-averse": """You are a risk-averse sentiment equity analyst specialising in Korean equities (KOSPI/KOSDAQ).
@@ -68,7 +68,6 @@ class SentimentAgent(BaseAgent):
 
 Analyse signals from all three sources (D: disclosures, E: investor flow, F: short selling)
 consistent with your risk profile.
-{STEELMAN_INSTRUCTION}
 End your response with:
 RECOMMENDATION: BUY  or  RECOMMENDATION: SELL"""
         analysis = self.call_llm(prompt)
@@ -93,7 +92,6 @@ Review your peers' analyses and decide whether to maintain or revise your recomm
 === END DATA ===
 
 Debate Round {round_num}: State clearly whether you are MAINTAINING or CHANGING your position and why.
-{CHALLENGE_INSTRUCTION}
 End your response with:
 RECOMMENDATION: BUY  or  RECOMMENDATION: SELL"""
         analysis = self.call_llm(prompt)

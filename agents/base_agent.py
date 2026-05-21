@@ -2,9 +2,11 @@ import anthropic
 import openai
 from config import ANTHROPIC_API_KEY, OPENAI_API_KEY, CLAUDE_MODEL, OPENAI_MODEL
 
-# ── Shared prompt instructions ────────────────────────────────────────────────
-# Injected into every agent's analyze() call.
-# Forces the agent to genuinely consider the opposing view before deciding.
+# ── Shared debate instructions ────────────────────────────────────────────────
+# Appended to every agent's system prompt so they are cached along with it.
+# Kept as module-level constants for reference; agents no longer inject them
+# into user messages.
+
 STEELMAN_INSTRUCTION = """
 Before stating your final recommendation, steelman the opposing view:
 - Write 2-3 sentences making the strongest possible case for the OPPOSITE signal
@@ -12,14 +14,23 @@ Before stating your final recommendation, steelman the opposing view:
 - This must reflect genuine engagement, not a token dismissal
 """
 
-# Injected into every agent's update_position() call (debate rounds).
-# Forces agents to actively dispute peer reasoning rather than passively absorb it.
 CHALLENGE_INSTRUCTION = """
 When reviewing peer analyses, actively challenge — do not simply acknowledge:
 - Identify specific claims in peer analyses that conflict with your data or reasoning
 - Explain precisely why those claims are wrong, overstated, or missing important context
 - If a peer argument genuinely changes your view, name the exact point that convinced you
 - Passive agreement without evidence ("I agree with the fundamental agent") is not acceptable
+"""
+
+_DEBATE_APPENDIX = f"""
+---
+## Debate Conduct
+
+**Initial analysis (Round 0):**
+{STEELMAN_INSTRUCTION.strip()}
+
+**Debate rounds (Round 1+):**
+{CHALLENGE_INSTRUCTION.strip()}
 """
 
 _claude = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
@@ -29,15 +40,21 @@ _openai = openai.OpenAI(api_key=OPENAI_API_KEY)
 class BaseAgent:
     def __init__(self, name: str, system_prompt: str):
         self.name = name
-        self.system_prompt = system_prompt
+        # Append shared debate instructions so the full system prompt —
+        # agent persona + steelman + challenge — is cached in one block.
+        self.system_prompt = system_prompt + _DEBATE_APPENDIX
 
     def call_llm(self, user_message: str, max_tokens: int = 2048) -> str:
-        """Call Claude; fall back to OpenAI if Claude fails."""
+        """Call Claude with a cached system prompt; fall back to OpenAI if Claude fails."""
         try:
             resp = _claude.messages.create(
                 model=CLAUDE_MODEL,
                 max_tokens=max_tokens,
-                system=self.system_prompt,
+                system=[{
+                    "type": "text",
+                    "text": self.system_prompt,
+                    "cache_control": {"type": "ephemeral"},  # cache across debate rounds
+                }],
                 messages=[{"role": "user", "content": user_message}],
             )
             return resp.content[0].text

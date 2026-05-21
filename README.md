@@ -21,7 +21,7 @@ python3 main.py
         │   │           OrchestratorAgent               │
         │   │                                           │
         │   │  For each stock:                          │
-        │   │    1. Fetch data  (DART + yfinance)       │
+        │   │    1. Fetch data  (DART + pykrx)          │
         │   │    2. Run 5-agent debate × 2 profiles     │
         │   │       (parallel)                          │
         │   │    3. Save  .md reports + _signals.json   │
@@ -71,10 +71,10 @@ python3 main.py
 
 | Agent | Data Source | Analytical Lens |
 |---|---|---|
-| **FundamentalAgent** | OpenDART (사업보고서 / 분기보고서) | Revenue trends, margins, cash flow quality, debt, governance |
-| **SentimentAgent** | yfinance news feed | News sentiment, analyst rating changes, insider signals |
-| **ValuationAgent** | yfinance price & volume (3-month window) | Price momentum, annualised return & volatility, volume confirmation |
-| **MarketAgent** | yfinance sector info + Korean peer tickers | Industry cycle, competitive positioning, peer valuation vs KOSPI |
+| **FundamentalAgent** | OpenDART — stage-aware: 3 annual FYs + all interim reports (initial) / 1 annual + 1 interim (rebalancing) | Revenue trends, margins, cash flow quality, debt, governance |
+| **SentimentAgent** | DART disclosure list · pykrx investor net flow · pykrx short selling | Corporate events, foreign/institutional accumulation vs distribution, bearish positioning |
+| **TechnicalAgent** | pykrx price history — current quarter + prior quarter + KOSPI/KOSDAQ index | MA20/MA60, RSI, Bollinger Bands, relative performance vs benchmarks, QoQ delta |
+| **MarketAgent** | DART KSIC sector (primary) · pykrx peer returns · pykrx benchmark returns · yfinance ratios (optional) | Industry cycle, competitive positioning, KOSPI/KOSDAQ benchmark comparison |
 | **MacroAgent** | KRW/USD · KOSPI · KOSDAQ · S&P 500 · NASDAQ · US 10Y · Oil · Gold | Currency impact, interest rate environment, Korea vs global capital flows |
 
 Each agent is independently role-prompted with the chosen risk profile and produces a standalone **BUY / SELL** recommendation before entering the debate phase.
@@ -117,7 +117,7 @@ round_score   : 1.0 at round 0 (instant consensus), decays to 0.0 at round 3
 | Agent | Weight | Rationale |
 |---|---|---|
 | FundamentalAgent | 0.30 | Hardest quantitative data |
-| ValuationAgent | 0.25 | Direct price-signal evidence |
+| TechnicalAgent | 0.25 | Direct price-signal evidence |
 | MacroAgent | 0.20 | Structural macro context |
 | MarketAgent | 0.15 | Industry positioning |
 | SentimentAgent | 0.10 | Softest / most noisy signal |
@@ -151,8 +151,8 @@ After all stocks are analysed, the **PortfolioAgent** constructs two separate po
 
 **Benchmarks overlaid on every chart:**
 1. **EW Benchmark** — equal-weight of all analysed stocks regardless of signal (orange)
-2. **KOSPI** — `^KS11` fetched via yfinance (green)
-3. **KOSDAQ** — `^KQ11` fetched via yfinance (purple)
+2. **KOSPI** — fetched via pykrx (green)
+3. **KOSDAQ** — fetched via pykrx (purple)
 
 Backtesting is skipped automatically if no stocks qualify for equity allocation in either profile.
 
@@ -185,23 +185,26 @@ Built with **reportlab** — institutional navy/gold design, Korean font support
 alpha_agents/
 │
 ├── main.py                        # Entry point — [N] New / [L] Load / [C] Convert
-├── config.py                      # API keys & model settings
+├── config.py                      # API keys, model settings, DEBUG_MODE
 ├── requirements.txt
 │
 ├── agents/
-│   ├── base_agent.py              # Claude (primary) + OpenAI (fallback) LLM wrapper
+│   ├── base_agent.py              # Claude (cached) + OpenAI (fallback) LLM wrapper
 │   ├── fundamental_agent.py       # OpenDART financial disclosure analysis
-│   ├── sentiment_agent.py         # News sentiment analysis
-│   ├── valuation_agent.py         # Price / volume / volatility analysis
+│   ├── sentiment_agent.py         # DART disclosures + investor flow + short selling
+│   ├── technical_agent.py         # Price action, MA/RSI/Bollinger, relative performance
 │   ├── market_agent.py            # Industry cycle, competitive landscape, peers
 │   └── macro_agent.py             # KRW/USD, rates, KOSPI vs global indices
 │
 ├── tools/
 │   ├── dart_tools.py              # OpenDART: corp registry + financial statements
-│   ├── yfinance_tools.py          # Price history & news (anchored to as-of date)
-│   ├── metrics_tools.py           # Annualised return, volatility (paper formulas)
-│   ├── market_tools.py            # Sector info, KOSPI benchmark, peer tickers
-│   └── macro_tools.py             # KRW/USD, US yields, global indices, commodities
+│   ├── dart_report_planner.py     # Stage-aware DART report planning (initial vs rebalancing)
+│   ├── pykrx_tools.py             # KRX price & index data via pykrx
+│   ├── sentiment_tools.py         # DART disclosures + pykrx investor flow + short selling
+│   ├── metrics_tools.py           # MA, RSI, Bollinger Bands, relative perf, QoQ delta
+│   ├── market_tools.py            # KSIC sector mapping, peer tickers, benchmark returns
+│   ├── macro_tools.py             # KRW/USD, US yields, global indices, commodities
+│   └── yfinance_tools.py          # Ticker lookup + optional ratio enrichment
 │
 ├── debate/
 │   └── debate_manager.py          # 5-agent round-robin debate + majority vote
@@ -361,6 +364,42 @@ If you have existing `.md` reports from before the signal JSON feature was added
 - Each agent operates independently — no shared memory or state within a round
 - Debate context is passed as explicit text, preserving full transparency
 
+### Prompt Caching
+
+All LLM calls use Anthropic's **prompt caching** to reduce token costs:
+
+| Cached content | Savings |
+|---|---|
+| **Tier 1** — Agent system prompt + debate instructions (steelman / challenge) | ~90% cheaper from Round 1 onwards |
+| **Tier 2** — Agent's data blob (DART financials, pykrx metrics, etc.) | ~90% cheaper from Round 1 onwards |
+
+Per stock (5 agents × 2 profiles × up to 4 rounds = 40 calls): only Round 0 pays full price for system prompts and data. Rounds 1–3 hit cache for both.
+
+### Run Modes
+
+```bash
+# Full quality — for actual investment decisions
+python3 main.py
+
+# Pipeline testing — zero token cost, stub BUY responses
+DEBUG_MODE=true python3 main.py
+
+# Real analysis at ~20x lower cost — for development/debugging
+CLAUDE_MODEL=claude-haiku-4-5 python3 main.py
+```
+
+---
+
+## Data Sources
+
+| Agent | Primary | Fallback |
+|---|---|---|
+| FundamentalAgent | OpenDART `/fnlttSinglAcnt.json` | — |
+| SentimentAgent | DART `/list.json` · pykrx investor flow · pykrx short selling | — |
+| TechnicalAgent | pykrx `get_market_ohlcv_by_date()` | — |
+| MarketAgent | DART `corp_info` (KSIC sector) · pykrx peer returns | yfinance (P/E, P/B ratios) |
+| MacroAgent | yfinance (KRW/USD, indices, commodities) | — |
+
 ---
 
 ## Macro Indicators Tracked
@@ -398,10 +437,10 @@ where $w_i$ = agent weight, $r$ = rounds taken, $R_{\max}$ = 3.
 
 ## Limitations
 
-- **News coverage:** yfinance news is sparse for smaller KOSPI/KOSDAQ stocks. The SentimentAgent may receive limited data for mid/small-cap names.
-- **Financial data lag:** OpenDART financials reflect the most recently filed annual report — typically the prior completed fiscal year.
-- **KRX login warning:** pykrx prints a login warning on startup — this is cosmetic and does not affect data fetching.
+- **KRX login warning:** pykrx prints a login warning on startup — this is cosmetic and does not affect data fetching. Public market data works without credentials.
+- **Financial data lag:** OpenDART financials reflect the most recently filed report based on Korea's actual filing calendar. For dates before key deadlines (Mar 31 / May 15 / Aug 14 / Nov 14), earlier reports are used.
 - **Peer mapping:** Sector peer tickers are predefined for major Korean sectors. Niche or cross-sector companies may lack ideal comparisons.
+- **yfinance ratios:** P/E and P/B ratios from yfinance are optional enrichment — many Korean stocks return N/A. Core analysis does not depend on them.
 - **LLM outputs:** Despite the multi-agent debate mechanism (which demonstrably reduces hallucination — Du et al., 2023), all outputs should be treated as research assistance, not financial advice.
 
 ---
@@ -425,4 +464,4 @@ where $w_i$ = agent weight, $r$ = rounds taken, $R_{\max}$ = 3.
 
 ---
 
-*K-AlphaAgents — Built with Claude (Anthropic) · OpenAI · OpenDART · pykrx · yfinance · reportlab*
+*K-AlphaAgents — Built with Claude (Anthropic) · OpenAI · OpenDART · pykrx · reportlab*

@@ -67,13 +67,16 @@ class OrchestratorAgent:
 
     def analyze_stock(self, stock_code: str, as_of_date: datetime,
                       corp_info: dict, stage: str = "initial",
-                      progress_cb=None) -> dict:
+                      progress_cb=None, output_dir: Optional[str] = None) -> dict:
         """
         Fetch data and run the 5-agent debate for one stock.
         Saves per-profile markdown reports.
         Returns a result dict to be stored by the caller.
 
         progress_cb(event, *args) — optional callback for web UI progress.
+        output_dir : if provided, save files here instead of the default path.
+                     Used by RebalanceEngine to place Q2+ reports under
+                     backtest/rebalance/Q{n}/{ticker}_{name}/.
         """
         company_name = corp_info["corp_name"]
 
@@ -89,16 +92,24 @@ class OrchestratorAgent:
         debate_results = self._run_debates(company_name, data, progress_cb=progress_cb)
 
         # ── Output paths ──────────────────────────────────────────────────────
-        # Structure: reports/{run_date}/{ticker}_{name}/{ticker}_{name}_{analysis_date}.*
+        # Structure: reports/{run_date}/{as_of_date}/{ticker}_{name}/
+        #            └── neutral/{base}_neutral.md
+        #            └── averse/{base}_averse.md
+        #            └── {base}.json  (combined, both profiles)
         safe_name = _safe_filename(company_name)
         date_tag  = as_of_date.strftime("%Y-%m-%d")
         run_date  = datetime.now().strftime("%Y-%m-%d")
         base_name = f"{stock_code}_{safe_name}_{date_tag}"
 
-        stock_dir = os.path.join(REPORTS_DIR, run_date, f"{stock_code}_{safe_name}")
+        if output_dir is not None:
+            stock_dir = output_dir
+        else:
+            stock_dir = os.path.join(
+                REPORTS_DIR, run_date, date_tag, f"{stock_code}_{safe_name}"
+            )
         os.makedirs(stock_dir, exist_ok=True)
 
-        # Per-stock markdown reports
+        # Per-stock markdown reports — each profile in its own subfolder
         report_files = {}
         for profile in PROFILES:
             report_md = generate_report(
@@ -107,8 +118,10 @@ class OrchestratorAgent:
                 portfolio=None,
                 as_of_date=as_of_date,
             )
-            tag      = "averse" if profile == "risk-averse" else "neutral"
-            filename = os.path.join(stock_dir, f"{base_name}_{tag}.md")
+            tag         = "averse" if profile == "risk-averse" else "neutral"
+            profile_dir = os.path.join(stock_dir, tag)
+            os.makedirs(profile_dir, exist_ok=True)
+            filename    = os.path.join(profile_dir, f"{base_name}_{tag}.md")
             with open(filename, "w", encoding="utf-8") as f:
                 f.write(report_md)
             report_files[profile] = filename
@@ -124,7 +137,7 @@ class OrchestratorAgent:
         for profile, path in report_files.items():
             print(f"  Report [{profile}]: {path}")
 
-        # Save signals to JSON (auto-generated — no manual conversion needed)
+        # Combined JSON at ticker folder level (contains both profiles)
         signals_path = os.path.join(stock_dir, f"{base_name}.json")
         with open(signals_path, "w", encoding="utf-8") as f:
             json.dump({
@@ -195,9 +208,9 @@ class OrchestratorAgent:
         date_tag  = as_of_date.strftime("%Y-%m-%d")
         stock_tag = "_".join(all_results.keys())
         run_date  = datetime.now().strftime("%Y-%m-%d")
-        run_dir   = os.path.join(REPORTS_DIR, run_date)
-        os.makedirs(run_dir, exist_ok=True)
-        pdf_path  = os.path.join(run_dir, f"Exec_Sum_{date_tag}.pdf")
+        bh_dir    = os.path.join(REPORTS_DIR, run_date, date_tag, "backtest", "buy_and_hold")
+        os.makedirs(bh_dir, exist_ok=True)
+        pdf_path  = os.path.join(bh_dir, f"Exec_Sum_{date_tag}.pdf")
 
         if not any_equity:
             print("\n  No stocks were recommended for purchase by either profile.")

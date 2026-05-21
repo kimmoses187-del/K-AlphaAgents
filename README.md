@@ -175,24 +175,42 @@ Backtesting is skipped automatically if no stocks receive a BUY signal in either
 
 ## Output Files
 
-All outputs are saved under `reports/` organised by the date the analysis was **run** (not the data as-of date):
+All outputs are saved under `reports/` organised first by **run date** (when the analysis was executed), then by **data as-of date** (the cutoff date for all data), then by stock and risk profile:
 
 ```
 reports/
-└── {run_date}/                          ← date the analysis was run (YYYY-MM-DD)
-    ├── {ticker}_{name}/                 ← one folder per stock
-    │   ├── {ticker}_{name}_{as-of}_averse.md
-    │   ├── {ticker}_{name}_{as-of}_neutral.md
-    │   └── {ticker}_{name}_{as-of}.json    ← structured signals (auto-generated)
-    └── Exec_Sum_{as-of}.pdf             ← Executive Summary PDF
+└── {run_date}/                              ← date the analysis was run (YYYY-MM-DD)
+    └── {as_of_date}/                        ← data cutoff date entered by the user
+        ├── {ticker}_{name}/                 ← one folder per stock
+        │   ├── neutral/
+        │   │   └── {ticker}_{name}_{as-of}_neutral.md
+        │   ├── averse/
+        │   │   └── {ticker}_{name}_{as-of}_averse.md
+        │   └── {ticker}_{name}_{as-of}.json    ← signals for both profiles
+        └── backtest/
+            ├── buy_and_hold/
+            │   └── Exec_Sum_{as-of}.pdf         ← Executive Summary PDF
+            └── rebalance/                        ← only present if rebalancing was run
+                ├── Q2/
+                │   └── {ticker}_{name}/
+                │       ├── neutral/ ...
+                │       └── averse/  ...
+                ├── Q3/ ...
+                ├── Rebalanced_{as-of}.json       ← full weight schedule + quarterly log
+                └── Exec_Sum_Rebalanced_{as-of}.pdf
 ```
+
+Q1 analysis (the initial debate) lives at the top `{as_of_date}/{ticker}_{name}/` level.  
+Q2, Q3, … quarterly re-analyses are saved under `backtest/rebalance/Q{n}/`.
 
 | File | Contents |
 |---|---|
-| `*_averse.md` | Full agent analyses + debate log under the Risk-Averse profile |
-| `*_neutral.md` | Full agent analyses + debate log under the Risk-Neutral profile |
+| `neutral/*_neutral.md` | Full agent analyses + debate log under the Risk-Neutral profile |
+| `averse/*_averse.md` | Full agent analyses + debate log under the Risk-Averse profile |
 | `*.json` | Structured signals for both profiles — auto-created after every analysis run |
-| `Exec_Sum_*.pdf` | 2-page institutional PDF (see below) |
+| `buy_and_hold/Exec_Sum_*.pdf` | 2-page institutional PDF (buy-and-hold backtest) |
+| `rebalance/Exec_Sum_Rebalanced_*.pdf` | 2-page institutional PDF (rebalancing backtest) |
+| `rebalance/Rebalanced_*.json` | Saved weight schedule + quarterly log for future reload |
 
 Signal JSON files are created automatically after every `[N] New Analysis` run — no manual conversion step is required.
 
@@ -270,13 +288,22 @@ alpha_agents/
 │
 └── reports/                       # Auto-created on first run
     └── {run_date}/                ← date the analysis was run
-        ├── {ticker_A}_{name_A}/
-        │   ├── {ticker_A}_{name_A}_{as-of}_averse.md
-        │   ├── {ticker_A}_{name_A}_{as-of}_neutral.md
-        │   └── {ticker_A}_{name_A}_{as-of}.json
-        ├── {ticker_B}_{name_B}/
-        │   └── ...
-        └── Exec_Sum_{as-of}.pdf
+        └── {as_of_date}/          ← data cutoff date
+            ├── {ticker_A}_{name_A}/
+            │   ├── neutral/
+            │   │   └── {ticker_A}_{name_A}_{as-of}_neutral.md
+            │   ├── averse/
+            │   │   └── {ticker_A}_{name_A}_{as-of}_averse.md
+            │   └── {ticker_A}_{name_A}_{as-of}.json
+            ├── {ticker_B}_{name_B}/
+            │   └── ...
+            └── backtest/
+                ├── buy_and_hold/
+                │   └── Exec_Sum_{as-of}.pdf
+                └── rebalance/          ← if rebalancing was chosen
+                    ├── Q2/ · Q3/ ...
+                    ├── Rebalanced_{as-of}.json
+                    └── Exec_Sum_Rebalanced_{as-of}.pdf
 ```
 
 ---

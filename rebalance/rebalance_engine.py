@@ -27,7 +27,7 @@ from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 
-from orchestrator.orchestrator_agent import OrchestratorAgent
+from orchestrator.orchestrator_agent import OrchestratorAgent, _safe_filename
 from portfolio.portfolio_agent import construct_portfolio
 from rebalance.event_monitor import check_triggers, compute_momentum_scores
 from rebalance.weight_adjuster import adjust_weights
@@ -79,6 +79,7 @@ class RebalanceEngine:
         end_date: datetime,
         use_event_triggers: bool = True,
         initial_results: Optional[dict] = None,
+        run_dir: Optional[str] = None,
     ) -> Tuple[Dict[str, list], List[dict]]:
         """
         Main entry point.
@@ -99,6 +100,11 @@ class RebalanceEngine:
         weight_schedule : {"risk-averse": [(date, weights_dict), ...],
                            "risk-neutral": [(date, weights_dict), ...]}
         quarterly_log   : [{quarter, start, end, results, portfolios}, ...]
+
+        run_dir : base directory for this rebalancing run
+                  (reports/{run_date}/{as_of_date}).  Q2+ stock reports are
+                  saved under {run_dir}/backtest/rebalance/Q{n}/{ticker}_{name}/.
+                  If None, each quarter defaults to its own dated subfolder.
         """
         quarters      = get_quarter_dates(start_date, end_date)
         quarterly_log = []
@@ -131,7 +137,7 @@ class RebalanceEngine:
                 portfolios = construct_portfolio(stock_debate_results)
             else:
                 all_results, portfolios = self._run_quarter_analysis(
-                    stock_codes, corp_infos, q_start, q_num=q_num
+                    stock_codes, corp_infos, q_start, q_num=q_num, run_dir=run_dir
                 )
 
             # Quarter-start weights → schedule
@@ -174,15 +180,32 @@ class RebalanceEngine:
         corp_infos: Dict[str, dict],
         as_of_date: datetime,
         q_num: int = 1,
+        run_dir: Optional[str] = None,
     ) -> Tuple[dict, dict]:
-        """Run full 5-agent debate for every stock; return (all_results, portfolios)."""
+        """Run full 5-agent debate for every stock; return (all_results, portfolios).
+
+        Q2+ reports are saved under:
+          {run_dir}/backtest/rebalance/Q{q_num}/{ticker}_{name}/
+        Q1 is never called via this path (initial_results reused by caller).
+        """
         # Q1 = initial full picture (3 annual reports + all interim)
         # Q2+ = rebalancing delta (1 annual + most recent interim only)
         stage = "initial" if q_num == 1 else "rebalancing"
         all_results = {}
         for code in stock_codes:
+            # Build output_dir for Q2+ when run_dir is known
+            if run_dir is not None and q_num > 1:
+                safe_name  = _safe_filename(corp_infos[code]["corp_name"])
+                output_dir = os.path.join(
+                    run_dir, "backtest", "rebalance",
+                    f"Q{q_num}", f"{code}_{safe_name}"
+                )
+            else:
+                output_dir = None   # default path handled by analyze_stock
+
             result = self.orchestrator.analyze_stock(
-                code, as_of_date, corp_infos[code], stage=stage
+                code, as_of_date, corp_infos[code],
+                stage=stage, output_dir=output_dir
             )
             all_results[code] = result
 

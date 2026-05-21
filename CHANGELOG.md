@@ -5,6 +5,60 @@ Format: `[YYYY-MM-DD] — Summary`
 
 ---
 
+## [2026-05-21] — New report folder structure: run date → as-of date → stock → profile
+
+### What changed
+
+The `reports/` directory now follows a four-level hierarchy:
+
+```
+reports/{run_date}/{as_of_date}/{ticker}_{name}/{neutral|averse}/
+```
+
+Previously outputs were saved as:
+```
+reports/{run_date}/{ticker}_{name}/{ticker}_{name}_{as-of}_averse.md
+reports/{run_date}/{ticker}_{name}/{ticker}_{name}_{as-of}_neutral.md
+reports/{run_date}/Exec_Sum_{as-of}.pdf
+```
+
+They are now saved as:
+```
+reports/{run_date}/{as_of_date}/{ticker}_{name}/neutral/{ticker}_{name}_{as-of}_neutral.md
+reports/{run_date}/{as_of_date}/{ticker}_{name}/averse/{ticker}_{name}_{as-of}_averse.md
+reports/{run_date}/{as_of_date}/{ticker}_{name}/{ticker}_{name}_{as-of}.json
+reports/{run_date}/{as_of_date}/backtest/buy_and_hold/Exec_Sum_{as-of}.pdf
+```
+
+For rebalancing runs, quarterly analyses and outputs go under:
+```
+reports/{run_date}/{as_of_date}/backtest/rebalance/Q{n}/{ticker}_{name}/neutral/
+reports/{run_date}/{as_of_date}/backtest/rebalance/Q{n}/{ticker}_{name}/averse/
+reports/{run_date}/{as_of_date}/backtest/rebalance/Rebalanced_{as-of}.json
+reports/{run_date}/{as_of_date}/backtest/rebalance/Exec_Sum_Rebalanced_{as-of}.pdf
+```
+
+Q1 analysis (initial debate) lives at the top `{as_of_date}/{ticker}_{name}/` level and is not duplicated into a Q1 folder.
+
+### Why
+
+- **Run date vs as-of date** were conflated in the old structure. The run date is when you executed the pipeline; the as-of date is the data cutoff. Separating them makes it easy to re-run analysis on the same historical date on a different day without overwriting results.
+- **Profile subfolders** (`neutral/`, `averse/`) make it immediately clear which MD file belongs to which investor profile without reading the filename suffix.
+- **`backtest/` subfolder** cleanly separates analysis outputs (per-stock MDs and JSONs) from portfolio/backtest outputs (PDFs, Rebalanced JSON), keeping each stock folder focused on signal data only.
+- **Rebalancing quarters under `backtest/rebalance/Q{n}/`** give each quarterly re-analysis its own space while keeping all quarters under the same rebalancing run directory.
+
+### Files changed
+
+- `orchestrator/orchestrator_agent.py` — `analyze_stock()` creates `neutral/` and `averse/` subdirs; accepts optional `output_dir` for rebalancing quarters. `finalize()` writes PDF to `backtest/buy_and_hold/`.
+- `rebalance/rebalance_engine.py` — imports `_safe_filename`; threads `run_dir` through `run()` → `_run_quarter_analysis()`; builds per-stock `output_dir` for Q2+.
+- `main.py` — glob updated to 4-level depth for signal file discovery; `_save_rebalancing_json()` accepts `save_dir`; `_run_rebalancing()` computes `run_dir` once and routes both PDF and JSON into `backtest/rebalance/`.
+
+### Existing files
+
+All previously saved reports were migrated to the new structure in-place.
+
+---
+
 ## [2026-05-21] — Conviction scoring: connectedness-based agent weights
 
 ### Problem with the original weights

@@ -9,9 +9,6 @@ Run:
 Then open:  http://localhost:5001
 """
 
-from gevent import monkey
-monkey.patch_all()
-
 import os
 import sys
 
@@ -26,7 +23,7 @@ from web.runner  import run_web_session
 
 app       = Flask(__name__, template_folder="../templates")
 app.config["SECRET_KEY"] = "kalpha-agents-2026"
-socketio  = SocketIO(app, async_mode="gevent", cors_allowed_origins="*")
+socketio  = SocketIO(app, async_mode="threading", cors_allowed_origins="*")
 
 _sessions: dict[str, WebSession] = {}
 

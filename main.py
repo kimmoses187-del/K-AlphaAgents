@@ -113,7 +113,7 @@ def _load_signals_flow() -> tuple[dict, datetime]:
 
 # ── MD-to-JSON converter ─────────────────────────────────────────────────────
 
-_AGENTS = ["FundamentalAgent", "SentimentAgent", "ValuationAgent",
+_AGENTS = ["FundamentalAgent", "SentimentAgent", "TechnicalAgent",
            "MarketAgent", "MacroAgent"]
 
 _PROFILE_TAG = {"averse": "risk-averse", "neutral": "risk-neutral"}

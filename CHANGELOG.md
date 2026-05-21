@@ -5,6 +5,75 @@ Format: `[YYYY-MM-DD] — Summary`
 
 ---
 
+## [2026-05-21] — Remove legacy "Convert MD Reports" option
+
+- `main.py` + `web/runner.py` — removed the `[C] Convert MD Reports` menu option from both terminal and web UI startup
+- JSON signal files are now auto-generated on every analysis run, so manual conversion is no longer needed
+
+---
+
+## [2026-05-21] — Reorganise output into dated + per-stock subdirectories
+
+### New folder structure
+```
+reports/
+  {run_date}/                          ← date the analysis was run
+    {ticker}_{company_name}/           ← e.g. 214150_클래시스/
+      {ticker}_{company}_{date}_averse.md
+      {ticker}_{company}_{date}_neutral.md
+      {ticker}_{company}_{date}.json   ← auto-generated signal file
+    Exec_Sum_{analysis_date}.pdf       ← multi-stock PDF at run-date level
+```
+
+### What changed
+- `orchestrator/orchestrator_agent.py`
+  - `analyze_stock()` builds `reports/{run_date}/{ticker}_{name}/` directory and saves all MD and JSON files there
+  - Signal JSON renamed from `*_signals.json` → `{ticker}_{name}_{date}.json` (no suffix needed)
+  - `finalize()` saves PDF inside `reports/{run_date}/` and returns the path
+- `main.py` — `_list_signal_files()` searches 2 levels deep (`*/*/*.json`); `_find_md_pairs()` uses recursive glob; MD-to-JSON conversion saves next to source MDs
+- `web/runner.py` — signal file glob updated to match new depth; `_standard_backtest` uses return value of `finalize()` for PDF path
+
+---
+
+## [2026-05-21] — Web UI: in-browser file download
+
+- `web/app.py` — added `GET /download?file=reports/...` route; serves files as attachments with path-traversal protection (restricted to `reports/` directory only)
+- `web/session.py` — `stock_result()` accepts `signal_file=` path
+- `web/runner.py` — globs for signal JSON after each stock analysis, passes path to UI
+- `templates/ui.html` — done card shows **Download PDF** button (gold) + a **signals.json** button per stock; note about server restart window
+
+---
+
+## [2026-05-21] — Web UI (Flask + SocketIO)
+
+- `web/app.py` — Flask + SocketIO server on port 5001; `async_mode="threading"` for broad Python version compatibility
+- `web/session.py` — `WebSession` bridges the background pipeline thread and the browser using `threading.Event`; `ask()` blocks until the user responds, all other methods emit real-time events
+- `web/runner.py` — full pipeline rewrite using `session.ask()` instead of `input()`; supports new analysis, load-signals, standard backtest, and rebalancing modes
+- `templates/ui.html` — dark Bloomberg-style chat UI with real-time agent debate cards, stock pool sidebar, step tracker, and SocketIO client
+- `orchestrator/orchestrator_agent.py` — `_run_debates()` forwards `progress_cb` to `DebateManager.run()`, completing the full real-time progress callback chain
+- `requirements.txt` — added `flask`, `flask-socketio`, `simple-websocket`
+- `render.yaml` + `Procfile` — Render deployment config; start command `python3 web/app.py`; build command installs `fonts-nanum` for Linux Korean font support
+
+SocketIO event protocol:
+| Direction | Event | Payload |
+|---|---|---|
+| Server → Client | `s_message` | `{text, msg_type, subtext}` |
+| Server → Client | `s_question` | `{text, subtext, input_type, options}` |
+| Server → Client | `s_progress` | `{text}` |
+| Server → Client | `s_debate_start` | `{ticker, name}` |
+| Server → Client | `s_agent_update` | `{agent, status, signal, round}` |
+| Server → Client | `s_stock_result` | `{ticker, name, results, signal_file}` |
+| Server → Client | `s_done` | `{pdf_path}` |
+| Client → Server | `c_start` | — |
+| Client → Server | `c_input` | `{value}` |
+
+Run locally:
+```bash
+python3 web/app.py        # → http://localhost:5001
+```
+
+---
+
 ## [2026-05-21] — Debug mode + model override
 
 - `config.py`

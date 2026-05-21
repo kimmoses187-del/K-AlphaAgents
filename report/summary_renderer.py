@@ -23,12 +23,38 @@ import matplotlib.font_manager as fm
 import matplotlib.dates as mdates
 import numpy as np
 
-# ── Korean font setup (matplotlib) ───────────────────────────────────────────
-for _f in ("/System/Library/Fonts/AppleSDGothicNeo.ttc",
-           "/System/Library/Fonts/Supplemental/AppleGothic.ttf"):
-    if os.path.exists(_f):
-        fm.fontManager.addfont(_f)
-matplotlib.rcParams["font.family"] = ["Apple SD Gothic Neo", "AppleGothic", "sans-serif"]
+# ── Korean font — cross-platform lookup ──────────────────────────────────────
+_HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+def _find_font(*candidates: str) -> str:
+    """Return the first existing font path, or raise FileNotFoundError."""
+    for path in candidates:
+        if os.path.exists(path):
+            return path
+    raise FileNotFoundError(
+        "No Korean font found. Tried:\n" + "\n".join(f"  {p}" for p in candidates)
+    )
+
+_KOREAN_FONT = _find_font(
+    # Linux (Render): apt-get install -y fonts-nanum
+    "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
+    "/usr/share/fonts/nanum/NanumGothic.ttf",
+    # macOS system fonts (local dev)
+    "/System/Library/Fonts/Supplemental/AppleGothic.ttf",
+    "/System/Library/Fonts/AppleSDGothicNeo.ttc",
+)
+
+_UNICODE_FONT = _find_font(
+    "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
+    "/usr/share/fonts/nanum/NanumGothic.ttf",
+    "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+    "/System/Library/Fonts/Supplemental/AppleGothic.ttf",
+)
+
+# ── matplotlib Korean font ────────────────────────────────────────────────────
+fm.fontManager.addfont(_KOREAN_FONT)
+matplotlib.rcParams["font.family"] = ["NanumGothic", "Apple SD Gothic Neo",
+                                       "AppleGothic", "sans-serif"]
 
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_JUSTIFY
@@ -43,13 +69,10 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.lib.fonts import addMapping
 
-# ── Korean font setup (reportlab) ────────────────────────────────────────────
-_RL_GOTHIC  = "/System/Library/Fonts/Supplemental/AppleGothic.ttf"
-_RL_UNICODE = "/System/Library/Fonts/Supplemental/Arial Unicode.ttf"
-
-pdfmetrics.registerFont(TTFont("KoreanSans",     _RL_GOTHIC))
-pdfmetrics.registerFont(TTFont("KoreanSansBold", _RL_GOTHIC))
-pdfmetrics.registerFont(TTFont("KoreanUnicode",  _RL_UNICODE))
+# ── reportlab Korean font ─────────────────────────────────────────────────────
+pdfmetrics.registerFont(TTFont("KoreanSans",     _KOREAN_FONT))
+pdfmetrics.registerFont(TTFont("KoreanSansBold", _KOREAN_FONT))
+pdfmetrics.registerFont(TTFont("KoreanUnicode",  _UNICODE_FONT))
 addMapping("KoreanSans", 0, 0, "KoreanSans")
 addMapping("KoreanSans", 1, 0, "KoreanSansBold")
 

@@ -2,7 +2,7 @@ services:
   - type: web
     name: k-alpha-agents
     runtime: python
-    buildCommand: pip install -r requirements.txt
+    buildCommand: apt-get install -y fonts-nanum && pip install -r requirements.txt
     startCommand: python3 web/app.py
     plan: free
 

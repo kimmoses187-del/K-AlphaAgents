@@ -36,11 +36,11 @@ def _peers_of(agent_name: str, results: list) -> list:
 
 class DebateManager:
     def __init__(self, risk_profile: str = "risk-averse"):
-        self.fundamental = FundamentalAgent(risk_profile)
-        self.sentiment   = SentimentAgent(risk_profile)
-        self.technical   = TechnicalAgent(risk_profile)
-        self.market      = MarketAgent(risk_profile)
-        self.macro       = MacroAgent(risk_profile)
+        self.fundamental  = FundamentalAgent(risk_profile)
+        self.sentiment    = SentimentAgent(risk_profile)
+        self.technical    = TechnicalAgent(risk_profile)
+        self.market       = MarketAgent(risk_profile)
+        self.macro        = MacroAgent(risk_profile)
         self.risk_profile = risk_profile
 
     def run(self, company_name: str,
@@ -49,28 +49,57 @@ class DebateManager:
             technical_data: str,
             market_data: str,
             macro_data: str,
-            progress_cb=None) -> dict:
+            progress_cb=None,
+            display=None) -> dict:
         """
         Run the full 5-agent collaboration + debate pipeline.
 
-        progress_cb(event, *args) — optional callback for web UI:
-          ('agent_update', agent_name, status, signal, round_num)
+        display     : DebateGrid instance for in-place terminal updates.
+                      When provided, all terminal output goes through the
+                      grid (no plain prints from this method).
+        progress_cb : optional callback for web UI
+                      ('agent_update', agent_name, status, signal, round_num)
 
         Returns a dict with:
           company_name, final_signal, consensus_type
           ("unanimous" | "majority"), consensus_round, debate_log
         """
-        def _cb(agent, status, signal="", rnd=0):
-            print(f"      {agent:<20}: {status} {signal}")
+        profile = self.risk_profile
+
+        def _cb(agent: str, status: str, signal: str = "", rnd: int = 0):
+            if display:
+                display.update_agent(profile, agent, status, signal, rnd)
+            else:
+                print(f"      {agent:<20}: {status} {signal}")
             if progress_cb:
                 progress_cb("agent_update", agent, status, signal, rnd)
+
+        def _header(rnd: int):
+            if display:
+                display.update_header(profile, rnd)
+
+        def _result_line(sig: str, rnd: int, ctype: str,
+                         buy_n: int = 0, sell_n: int = 0):
+            if display:
+                display.print_result(profile, sig, rnd, ctype, buy_n, sell_n)
+            else:
+                if ctype == "unanimous":
+                    print(f"  [{profile.upper()}] → Unanimous: {sig}  (round {rnd})")
+                else:
+                    print(f"  [{profile.upper()}] → Majority vote: {sig}"
+                          f"  (BUY {buy_n} – SELL {sell_n})")
 
         debate_log = []
 
         # ── Phase 1: Independent analysis ────────────────────────────────
-        print("  [Round 0] Independent analysis...")
-        for agent_name in ["FundamentalAgent","SentimentAgent","TechnicalAgent","MarketAgent","MacroAgent"]:
-            _cb(agent_name, "analyzing…", "", 0)
+        _header(0)
+        # Grid already shows all agents as "analyzing…"; no extra pre-print needed.
+        # (Without a grid, print them now so the user sees the names.)
+        if not display:
+            print(f"  [{profile.upper()}]  Round 0 — Independent analysis")
+            for name in ["FundamentalAgent","SentimentAgent","TechnicalAgent",
+                         "MarketAgent","MacroAgent"]:
+                _cb(name, "analyzing…", "", 0)
 
         fund_r   = self.fundamental.analyze(fundamental_data, company_name)
         _cb("FundamentalAgent", "done", fund_r["signal"], 0)
@@ -88,35 +117,44 @@ class DebateManager:
 
         unanimous, signal = _check_unanimous(current)
         if unanimous:
-            print(f"  → Unanimous consensus: {signal} (no debate needed)")
+            _result_line(signal, 0, "unanimous")
             return self._result(company_name, signal, "unanimous", 0, debate_log)
 
         # ── Phase 2: Debate rounds ────────────────────────────────────────
         for rnd in range(1, MAX_DEBATE_ROUNDS + 1):
-            print(f"  [Round {rnd}] Debate...")
+            _header(rnd)
 
+            _cb("FundamentalAgent", "analyzing", "", rnd)
             fund_r   = self.fundamental.update_position(
                 fundamental_data, company_name, _peers_of("FundamentalAgent", current), rnd)
-            _cb("FundamentalAgent", f"round {rnd}", fund_r["signal"], rnd)
+            _cb("FundamentalAgent", "round", fund_r["signal"], rnd)
+
+            _cb("SentimentAgent", "analyzing", "", rnd)
             sent_r   = self.sentiment.update_position(
                 sentiment_data,   company_name, _peers_of("SentimentAgent",   current), rnd)
-            _cb("SentimentAgent",   f"round {rnd}", sent_r["signal"], rnd)
+            _cb("SentimentAgent",   "round", sent_r["signal"], rnd)
+
+            _cb("TechnicalAgent", "analyzing", "", rnd)
             tech_r   = self.technical.update_position(
                 technical_data,   company_name, _peers_of("TechnicalAgent",   current), rnd)
-            _cb("TechnicalAgent",   f"round {rnd}", tech_r["signal"], rnd)
+            _cb("TechnicalAgent",   "round", tech_r["signal"], rnd)
+
+            _cb("MarketAgent", "analyzing", "", rnd)
             market_r = self.market.update_position(
                 market_data,      company_name, _peers_of("MarketAgent",      current), rnd)
-            _cb("MarketAgent",      f"round {rnd}", market_r["signal"], rnd)
+            _cb("MarketAgent",      "round", market_r["signal"], rnd)
+
+            _cb("MacroAgent", "analyzing", "", rnd)
             macro_r  = self.macro.update_position(
                 macro_data,       company_name, _peers_of("MacroAgent",       current), rnd)
-            _cb("MacroAgent",       f"round {rnd}", macro_r["signal"], rnd)
+            _cb("MacroAgent",       "round", macro_r["signal"], rnd)
 
             current = [fund_r, sent_r, tech_r, market_r, macro_r]
             debate_log.append({"round": rnd, "label": f"Debate Round {rnd}", "results": current})
 
             unanimous, signal = _check_unanimous(current)
             if unanimous:
-                print(f"  → Unanimous consensus: {signal}")
+                _result_line(signal, rnd, "unanimous")
                 return self._result(company_name, signal, "unanimous", rnd, debate_log)
 
         # ── No unanimous consensus after MAX_DEBATE_ROUNDS ───────────────
@@ -124,14 +162,8 @@ class DebateManager:
         signals      = [r["signal"] for r in current]
         buy_count    = signals.count("BUY")
         sell_count   = signals.count("SELL")
-        print(f"  → No unanimous consensus after {MAX_DEBATE_ROUNDS} rounds.")
-        print(f"  → Majority vote: {final_signal}  (BUY: {buy_count}, SELL: {sell_count})")
+        _result_line(final_signal, MAX_DEBATE_ROUNDS, "majority", buy_count, sell_count)
         return self._result(company_name, final_signal, "majority", MAX_DEBATE_ROUNDS, debate_log)
-
-    @staticmethod
-    def _print_signals(results: list):
-        for r in results:
-            print(f"      {r['agent']:<20}: {r['signal']}")
 
     @staticmethod
     def _result(company_name, signal, consensus_type, round_num, log):

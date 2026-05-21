@@ -364,7 +364,15 @@ class OrchestratorAgent:
 
     def _run_debates(self, company_name: str, data: dict,
                      progress_cb=None) -> dict:
+        from debate.terminal_display import DebateGrid
+
         print("\n  [2/2] Running debates (both profiles in parallel)...")
+
+        # Build the shared in-place grid (terminal only; skipped if web callback active)
+        grid = None
+        if not progress_cb:
+            grid = DebateGrid()
+            grid.init()
 
         def _debate(profile: str) -> tuple:
             manager = DebateManager(risk_profile=profile)
@@ -376,6 +384,7 @@ class OrchestratorAgent:
                 market_data=data["market_data"],
                 macro_data=data["macro_data"],
                 progress_cb=progress_cb,
+                display=grid,
             )
             return profile, result
 

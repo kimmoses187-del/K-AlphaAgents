@@ -66,11 +66,14 @@ class OrchestratorAgent:
     # ── Phase 1: single-stock analysis ───────────────────────────────────────
 
     def analyze_stock(self, stock_code: str, as_of_date: datetime,
-                      corp_info: dict, stage: str = "initial") -> dict:
+                      corp_info: dict, stage: str = "initial",
+                      progress_cb=None) -> dict:
         """
         Fetch data and run the 5-agent debate for one stock.
         Saves per-profile markdown reports.
         Returns a result dict to be stored by the caller.
+
+        progress_cb(event, *args) — optional callback for web UI progress.
         """
         company_name = corp_info["corp_name"]
 
@@ -78,8 +81,12 @@ class OrchestratorAgent:
         print(f"  Analyzing {company_name} ({stock_code})")
         print(f"{'─'*60}")
 
-        data           = self._fetch_data(stock_code, as_of_date, corp_info, stage=stage)
-        debate_results = self._run_debates(company_name, data)
+        if progress_cb:
+            progress_cb("debate_start", stock_code, company_name)
+
+        data           = self._fetch_data(stock_code, as_of_date, corp_info,
+                                          stage=stage, progress_cb=progress_cb)
+        debate_results = self._run_debates(company_name, data, progress_cb=progress_cb)
 
         # Per-stock markdown reports (no portfolio weights yet)
         os.makedirs(REPORTS_DIR, exist_ok=True)
@@ -137,15 +144,19 @@ class OrchestratorAgent:
 
     # ── Phase 2: portfolio + backtest + PDF ───────────────────────────────────
 
-    def finalize(self, all_results: dict, as_of_date: datetime) -> None:
+    def finalize(self, all_results: dict, as_of_date: datetime,
+                 end_date_override: datetime = None,
+                 progress_cb=None) -> None:
         """
         Construct the multi-stock portfolio, auto-run the backtest,
         and produce a PDF executive summary.
 
         Parameters
         ----------
-        all_results : {stock_code: analyze_stock() return dict}
-        as_of_date  : shared analysis date (= backtest start date)
+        all_results       : {stock_code: analyze_stock() return dict}
+        as_of_date        : shared analysis date (= backtest start date)
+        end_date_override : if provided, skip the input() prompt for end date
+        progress_cb       : optional callable for web UI progress updates
         """
         company_names = {code: r["company_name"] for code, r in all_results.items()}
 
@@ -190,23 +201,26 @@ class OrchestratorAgent:
             print("  Backtesting skipped — capital fully preserved in bond allocation.")
             backtest_results = None
         else:
-            # ── Auto-start backtest ───────────────────────────────────────
-            print(f"\n  Automatically starting backtest...")
-            while True:
-                raw = input(
-                    f"  Enter backtest end date (YYYY/MM/DD)"
-                    f"  [must be after {as_of_date.strftime('%Y-%m-%d')}]: "
-                ).strip()
-                try:
-                    end_date = datetime.strptime(raw, "%Y/%m/%d")
-                except ValueError:
-                    print("  Invalid format. Please use YYYY/MM/DD.")
-                    continue
-                if end_date <= as_of_date:
-                    print(f"  End date must be after the analysis date "
-                          f"({as_of_date.strftime('%Y-%m-%d')}). Try again.")
-                    continue
-                break
+            # ── Backtest end date — from override (web) or input() (terminal) ─
+            if end_date_override is not None:
+                end_date = end_date_override
+            else:
+                print(f"\n  Automatically starting backtest...")
+                while True:
+                    raw = input(
+                        f"  Enter backtest end date (YYYY/MM/DD)"
+                        f"  [must be after {as_of_date.strftime('%Y-%m-%d')}]: "
+                    ).strip()
+                    try:
+                        end_date = datetime.strptime(raw, "%Y/%m/%d")
+                    except ValueError:
+                        print("  Invalid format. Please use YYYY/MM/DD.")
+                        continue
+                    if end_date <= as_of_date:
+                        print(f"  End date must be after the analysis date "
+                              f"({as_of_date.strftime('%Y-%m-%d')}). Try again.")
+                        continue
+                    break
 
             print(f"\n  Running backtest: "
                   f"{as_of_date.strftime('%Y-%m-%d')} → {end_date.strftime('%Y-%m-%d')}")
@@ -245,18 +259,24 @@ class OrchestratorAgent:
     # ── Private helpers ───────────────────────────────────────────────────────
 
     def _fetch_data(self, stock_code: str, as_of_date: datetime,
-                    corp_info: dict, stage: str = "initial") -> dict:
-        print("\n  [1/2] Fetching data...")
+                    corp_info: dict, stage: str = "initial",
+                    progress_cb=None) -> dict:
+        def _log(msg):
+            print(msg)
+            if progress_cb:
+                progress_cb("fetch", msg.strip())
+
+        _log("\n  [1/2] Fetching data...")
         company_name = corp_info["corp_name"]
 
         # ── DART: dynamic report planning ─────────────────────────────────
         reports_plan  = plan_reports(as_of_date, stage=stage)
         cov_note      = build_coverage_note(reports_plan, as_of_date)
-        print(f"    {describe_plan(reports_plan, as_of_date, stage)}")
+        _log(f"    {describe_plan(reports_plan, as_of_date, stage)}")
         fundamental_data = fetch_and_format_reports(corp_info, reports_plan, cov_note)
 
         # ── pykrx: price history (current + previous quarter + benchmarks) ─
-        print("    pykrx: price history (current + prev quarter + KOSPI/KOSDAQ)...")
+        _log("    pykrx: price history (current + prev quarter + KOSPI/KOSDAQ)...")
         price_history  = fetch_ohlcv(stock_code, as_of_date, months=3, offset_months=0)
         prev_quarter   = fetch_ohlcv(stock_code, as_of_date, months=3, offset_months=3)
         kospi_history  = fetch_index_ohlcv(KOSPI_INDEX,  as_of_date, months=3)
@@ -278,7 +298,7 @@ class OrchestratorAgent:
 
         # ── Sentiment: DART disclosures + pykrx investor flow + short selling ─
         corp_code = corp_info.get("corp_code", "")
-        print("    sentiment: DART disclosures + investor flow + short selling...")
+        _log("    sentiment: DART disclosures + investor flow + short selling...")
         sentiment_data = fetch_sentiment_data(
             corp_code=corp_code,
             stock_code=stock_code,
@@ -288,7 +308,7 @@ class OrchestratorAgent:
         )
 
         # ── Market: sector from DART + peer returns via pykrx ────────────────
-        print("    sector / peers / macro...")
+        _log("    sector / peers / macro...")
 
         # Compute benchmark returns from already-fetched pykrx history (no extra call)
         def _period_ret(hist):
@@ -325,7 +345,8 @@ class OrchestratorAgent:
             "ticker_str":       ticker_str,
         }
 
-    def _run_debates(self, company_name: str, data: dict) -> dict:
+    def _run_debates(self, company_name: str, data: dict,
+                     progress_cb=None) -> dict:
         print("\n  [2/2] Running debates (both profiles in parallel)...")
 
         def _debate(profile: str) -> tuple:
@@ -337,6 +358,7 @@ class OrchestratorAgent:
                 technical_data=data["technical_data"],
                 market_data=data["market_data"],
                 macro_data=data["macro_data"],
+                progress_cb=progress_cb,
             )
             return profile, result
 

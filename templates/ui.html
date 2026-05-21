@@ -1,0 +1,888 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>K-AlphaAgents · Korean Equity Analysis</title>
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <style>
+    /* ── Reset & base ────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #0d1117;
+      --surface:   #161b22;
+      --surface2:  #1c2230;
+      --border:    #30363d;
+      --gold:      #f0b429;
+      --gold-dim:  #a07a1a;
+      --text:      #e6edf3;
+      --muted:     #8b949e;
+      --buy:       #3fb950;
+      --sell:      #f85149;
+      --info:      #58a6ff;
+      --warning:   #d29922;
+      --radius:    10px;
+      --sidebar-w: 260px;
+    }
+
+    html, body {
+      height: 100%; width: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    /* ── Layout ──────────────────────────────────────────────────── */
+    #shell {
+      display: flex;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    /* ── Sidebar ─────────────────────────────────────────────────── */
+    #sidebar {
+      width: var(--sidebar-w);
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      padding: 20px 16px;
+      gap: 24px;
+      overflow-y: auto;
+      flex-shrink: 0;
+    }
+
+    #logo {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    #logo .wordmark {
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--gold);
+      letter-spacing: 0.02em;
+    }
+
+    #logo .tagline {
+      font-size: 11px;
+      color: var(--muted);
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+    }
+
+    .sidebar-section {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .sidebar-label {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+      font-weight: 600;
+    }
+
+    /* Steps */
+    .step {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 6px 8px;
+      border-radius: 6px;
+      font-size: 12px;
+      color: var(--muted);
+      transition: background 0.2s;
+    }
+
+    .step.active {
+      background: rgba(240, 180, 41, 0.08);
+      color: var(--gold);
+    }
+
+    .step.done {
+      color: var(--buy);
+    }
+
+    .step-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--border);
+      flex-shrink: 0;
+    }
+
+    .step.active .step-dot { background: var(--gold); }
+    .step.done  .step-dot  { background: var(--buy); }
+
+    /* Stock pool */
+    #pool-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .pool-pill {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 6px 10px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-size: 12px;
+    }
+
+    .pool-pill .code { color: var(--gold); font-weight: 600; }
+    .pool-pill .sig  { font-weight: 700; font-size: 11px; }
+    .pool-pill .sig.buy  { color: var(--buy); }
+    .pool-pill .sig.sell { color: var(--sell); }
+
+    /* ── Main area ───────────────────────────────────────────────── */
+    #main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    /* Header */
+    #topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 20px;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+      flex-shrink: 0;
+    }
+
+    #topbar .title {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--muted);
+    }
+
+    #status-badge {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    #status-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--border);
+    }
+
+    #status-dot.ready   { background: var(--buy); }
+    #status-dot.working { background: var(--gold); animation: pulse 1.2s infinite; }
+
+    @keyframes pulse {
+      0%,100% { opacity: 1; } 50% { opacity: 0.3; }
+    }
+
+    /* Chat scroll */
+    #chat {
+      flex: 1;
+      overflow-y: auto;
+      padding: 24px 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    #chat::-webkit-scrollbar { width: 6px; }
+    #chat::-webkit-scrollbar-track { background: transparent; }
+    #chat::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+    /* Progress strip */
+    #progress-strip {
+      min-height: 28px;
+      padding: 6px 20px;
+      font-size: 11px;
+      color: var(--muted);
+      border-top: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      background: var(--surface);
+      transition: opacity 0.3s;
+    }
+
+    #progress-strip.hidden { opacity: 0; }
+
+    /* Input bar */
+    #inputbar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 12px 20px;
+      border-top: 1px solid var(--border);
+      background: var(--surface);
+      flex-shrink: 0;
+    }
+
+    #text-input {
+      flex: 1;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 14px;
+      color: var(--text);
+      font-size: 14px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    #text-input:focus { border-color: var(--gold); }
+    #text-input:disabled { opacity: 0.4; cursor: not-allowed; }
+    #text-input::placeholder { color: var(--muted); }
+
+    #send-btn {
+      background: var(--gold);
+      border: none;
+      border-radius: 8px;
+      padding: 8px 18px;
+      color: #0d1117;
+      font-weight: 700;
+      font-size: 13px;
+      cursor: pointer;
+      transition: background 0.2s, opacity 0.2s;
+      white-space: nowrap;
+    }
+
+    #send-btn:hover { background: #ffc93d; }
+    #send-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+
+    /* Buttons row */
+    #buttons-row {
+      display: none;
+      flex-wrap: wrap;
+      gap: 8px;
+      padding: 10px 20px;
+      border-top: 1px solid var(--border);
+      background: var(--surface);
+    }
+
+    .opt-btn {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 16px;
+      color: var(--text);
+      font-size: 13px;
+      cursor: pointer;
+      transition: border-color 0.2s, background 0.2s;
+    }
+
+    .opt-btn:hover {
+      border-color: var(--gold);
+      background: rgba(240, 180, 41, 0.07);
+      color: var(--gold);
+    }
+
+    /* ── Chat bubbles ─────────────────────────────────────────────── */
+    .bubble {
+      max-width: 680px;
+      width: fit-content;
+      border-radius: var(--radius);
+      padding: 12px 16px;
+      font-size: 13.5px;
+      line-height: 1.55;
+    }
+
+    .bubble.system {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text);
+      align-self: flex-start;
+    }
+
+    .bubble.user {
+      background: rgba(240, 180, 41, 0.10);
+      border: 1px solid rgba(240, 180, 41, 0.25);
+      color: var(--gold);
+      align-self: flex-end;
+    }
+
+    .bubble .sub {
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 5px;
+    }
+
+    /* Message types */
+    .bubble.msg-success { border-color: rgba(63, 185, 80, 0.4); }
+    .bubble.msg-error   { border-color: rgba(248, 81, 73, 0.4); background: rgba(248,81,73,0.07); }
+    .bubble.msg-warning { border-color: rgba(210, 153, 34, 0.4); }
+    .bubble.msg-loading { border-color: rgba(88, 166, 255, 0.3); }
+    .bubble.msg-info    { }
+
+    .bubble .icon { margin-right: 4px; }
+
+    /* Question bubble */
+    .bubble.question {
+      border-color: rgba(240, 180, 41, 0.3);
+    }
+
+    .bubble.question .q-label {
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+
+    /* Agent cards grid */
+    .agent-grid {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 8px;
+      width: 100%;
+      max-width: 680px;
+    }
+
+    .agent-card {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 8px;
+      text-align: center;
+      transition: border-color 0.3s;
+    }
+
+    .agent-card .ac-name {
+      font-size: 10px;
+      color: var(--muted);
+      font-weight: 600;
+      margin-bottom: 6px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .agent-card .ac-signal {
+      font-size: 15px;
+      font-weight: 700;
+      min-height: 22px;
+    }
+
+    .agent-card .ac-status {
+      font-size: 10px;
+      color: var(--muted);
+      margin-top: 3px;
+    }
+
+    .agent-card.wait  { }
+    .agent-card.busy  { border-color: var(--gold); }
+    .agent-card.buy   { border-color: var(--buy); }
+    .agent-card.buy   .ac-signal { color: var(--buy); }
+    .agent-card.sell  { border-color: var(--sell); }
+    .agent-card.sell  .ac-signal { color: var(--sell); }
+
+    /* Spinner */
+    .spinner {
+      display: inline-block;
+      width: 14px; height: 14px;
+      border: 2px solid var(--border);
+      border-top-color: var(--gold);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      vertical-align: middle;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Result card */
+    .result-card {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px 16px;
+      max-width: 680px;
+      width: 100%;
+    }
+
+    .result-card .rc-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+
+    .result-card .rc-ticker {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--gold);
+    }
+
+    .result-card .rc-name {
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    .result-card .rc-rows {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .rc-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 12px;
+      background: var(--surface);
+      border-radius: 6px;
+      font-size: 12px;
+    }
+
+    .rc-row .profile { color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
+    .rc-row .sig { font-weight: 800; font-size: 14px; }
+    .rc-row .sig.buy  { color: var(--buy); }
+    .rc-row .sig.sell { color: var(--sell); }
+    .rc-row .meta { color: var(--muted); font-size: 11px; display: flex; gap: 12px; }
+
+    /* Done card */
+    .done-card {
+      background: rgba(63,185,80,0.07);
+      border: 1px solid rgba(63,185,80,0.3);
+      border-radius: var(--radius);
+      padding: 14px 18px;
+      max-width: 680px;
+    }
+
+    .done-card .dc-title { font-weight: 700; margin-bottom: 4px; color: var(--buy); }
+    .done-card .dc-sub   { font-size: 12px; color: var(--muted); }
+  </style>
+</head>
+<body>
+
+<div id="shell">
+
+  <!-- ── Sidebar ──────────────────────────────────────────────────── -->
+  <aside id="sidebar">
+
+    <div id="logo">
+      <div class="wordmark">K-AlphaAgents</div>
+      <div class="tagline">Korean Equity · Multi-Agent AI</div>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="sidebar-label">Session Steps</div>
+      <div id="steps">
+        <div class="step" id="step-mode">   <div class="step-dot"></div> Choose Mode</div>
+        <div class="step" id="step-date">   <div class="step-dot"></div> Analysis Date</div>
+        <div class="step" id="step-stocks"> <div class="step-dot"></div> Add Stocks</div>
+        <div class="step" id="step-analyze"><div class="step-dot"></div> Agent Analysis</div>
+        <div class="step" id="step-backtest"><div class="step-dot"></div> Backtest</div>
+        <div class="step" id="step-report"> <div class="step-dot"></div> PDF Report</div>
+      </div>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="sidebar-label">Stock Pool</div>
+      <div id="pool-list"><span style="font-size:11px;color:var(--muted)">None yet</span></div>
+    </div>
+
+  </aside>
+
+  <!-- ── Main ─────────────────────────────────────────────────────── -->
+  <div id="main">
+
+    <div id="topbar">
+      <div class="title">Analysis Session</div>
+      <div id="status-badge">
+        <div id="status-dot"></div>
+        <span id="status-text">Connecting…</span>
+      </div>
+    </div>
+
+    <!-- Chat messages -->
+    <div id="chat"></div>
+
+    <!-- Progress strip -->
+    <div id="progress-strip" class="hidden"></div>
+
+    <!-- Button options (shown when server sends buttons) -->
+    <div id="buttons-row"></div>
+
+    <!-- Text input bar -->
+    <div id="inputbar">
+      <input id="text-input" type="text" placeholder="Waiting for connection…" disabled />
+      <button id="send-btn" disabled>Send</button>
+    </div>
+
+  </div>
+</div>
+
+<script>
+// ── State ──────────────────────────────────────────────────────────────────
+const chat       = document.getElementById("chat");
+const progress   = document.getElementById("progress-strip");
+const btnRow     = document.getElementById("buttons-row");
+const textInput  = document.getElementById("text-input");
+const sendBtn    = document.getElementById("send-btn");
+const statusDot  = document.getElementById("status-dot");
+const statusText = document.getElementById("status-text");
+const poolList   = document.getElementById("pool-list");
+
+let waitingForInput = false;  // true while server is blocking on ask()
+let inputType       = "text"; // "text" | "buttons"
+
+// pool: {code: {name, signal_averse, signal_neutral}}
+const stockPool = {};
+
+// Agent card state per ticker
+const agentCards = {}; // {ticker: {agent_name: card_el}}
+
+// ── Socket ─────────────────────────────────────────────────────────────────
+const socket = io({ transports: ["websocket"] });
+
+socket.on("connect", () => {
+  statusDot.className  = "ready";
+  statusText.textContent = "Connected";
+  // auto-start the pipeline
+  socket.emit("c_start");
+});
+
+socket.on("disconnect", () => {
+  statusDot.className    = "";
+  statusText.textContent = "Disconnected";
+  setInputMode("idle");
+});
+
+// ── Server events ──────────────────────────────────────────────────────────
+
+socket.on("s_ready", () => {
+  // nothing needed — c_start already sent on connect
+});
+
+socket.on("s_message", (d) => {
+  appendMessage(d.text, d.msg_type || "info", d.subtext || "");
+  scrollBottom();
+});
+
+socket.on("s_question", (d) => {
+  appendQuestion(d.text, d.subtext || "");
+  inputType = d.input_type || "text";
+
+  if (inputType === "buttons") {
+    showButtons(d.options || []);
+    setInputMode("buttons");
+  } else {
+    setInputMode("text", d.text);
+  }
+
+  waitingForInput = true;
+  scrollBottom();
+  // advance sidebar step based on question
+  inferStep(d.text);
+});
+
+socket.on("s_progress", (d) => {
+  progress.textContent = "⟳ " + d.text;
+  progress.classList.remove("hidden");
+});
+
+socket.on("s_debate_start", (d) => {
+  setStep("step-analyze");
+  appendDebateCards(d.ticker, d.name);
+  scrollBottom();
+});
+
+socket.on("s_agent_update", (d) => {
+  updateAgentCard(d.agent, d.status, d.signal, d.round);
+});
+
+socket.on("s_stock_result", (d) => {
+  progress.classList.add("hidden");
+  appendStockResult(d.ticker, d.name, d.results);
+  addToPool(d.ticker, d.name, d.results);
+  scrollBottom();
+});
+
+socket.on("s_done", (d) => {
+  setStep("step-report");
+  statusDot.className    = "";
+  statusText.textContent = "Session complete";
+  if (d.pdf_path) {
+    appendDone(d.pdf_path);
+  }
+  setInputMode("idle");
+  progress.classList.add("hidden");
+  scrollBottom();
+});
+
+// ── Input handling ─────────────────────────────────────────────────────────
+
+function sendValue(value) {
+  if (!waitingForInput) return;
+  waitingForInput = false;
+  socket.emit("c_input", { value });
+
+  // Show what the user typed/selected
+  appendUserBubble(value);
+
+  // Reset UI
+  hideButtons();
+  setInputMode("idle");
+  textInput.value = "";
+  statusDot.className    = "working";
+  statusText.textContent = "Analyzing…";
+  scrollBottom();
+}
+
+sendBtn.addEventListener("click", () => {
+  const v = textInput.value.trim();
+  if (v) sendValue(v);
+});
+
+textInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    const v = textInput.value.trim();
+    if (v) sendValue(v);
+  }
+});
+
+// ── UI helpers ─────────────────────────────────────────────────────────────
+
+function setInputMode(mode, placeholder = "") {
+  if (mode === "text") {
+    textInput.disabled  = false;
+    textInput.placeholder = placeholder || "Type your answer…";
+    sendBtn.disabled    = false;
+    textInput.focus();
+  } else if (mode === "buttons") {
+    textInput.disabled  = true;
+    textInput.placeholder = "Click an option above…";
+    sendBtn.disabled    = true;
+  } else {
+    // idle
+    textInput.disabled  = true;
+    textInput.placeholder = "";
+    sendBtn.disabled    = true;
+  }
+}
+
+function showButtons(options) {
+  btnRow.innerHTML = "";
+  btnRow.style.display = "flex";
+  options.forEach((opt) => {
+    const btn = document.createElement("button");
+    btn.className   = "opt-btn";
+    btn.textContent = opt.label;
+    btn.onclick     = () => sendValue(opt.value);
+    btnRow.appendChild(btn);
+  });
+}
+
+function hideButtons() {
+  btnRow.style.display = "none";
+  btnRow.innerHTML = "";
+}
+
+function scrollBottom() {
+  setTimeout(() => { chat.scrollTop = chat.scrollHeight; }, 50);
+}
+
+// ── Bubble builders ────────────────────────────────────────────────────────
+
+function appendMessage(text, type, subtext) {
+  const el = document.createElement("div");
+  el.className = `bubble system msg-${type}`;
+
+  const icons = { success:"✅", error:"❌", warning:"⚠️", loading:"🔍", info:"ℹ️" };
+  const icon  = icons[type] || "";
+
+  el.innerHTML = `<span class="icon">${icon}</span>${escHtml(text)}` +
+    (subtext ? `<div class="sub">${escHtml(subtext)}</div>` : "");
+  chat.appendChild(el);
+}
+
+function appendQuestion(text, subtext) {
+  const el = document.createElement("div");
+  el.className = "bubble system question";
+  el.innerHTML = `<div class="q-label">💬 ${escHtml(text)}</div>` +
+    (subtext ? `<div class="sub">${escHtml(subtext)}</div>` : "");
+  chat.appendChild(el);
+}
+
+function appendUserBubble(text) {
+  const el = document.createElement("div");
+  el.className   = "bubble user";
+  el.textContent = text;
+  chat.appendChild(el);
+}
+
+function appendDebateCards(ticker, name) {
+  const wrap = document.createElement("div");
+  wrap.className = "result-card";
+  wrap.style.marginBottom = "4px";
+  wrap.innerHTML = `<div class="rc-header">
+    <span class="rc-ticker">${escHtml(ticker)}</span>
+    <span class="rc-name">${escHtml(name)} · Agent Debate</span>
+  </div>`;
+
+  const grid = document.createElement("div");
+  grid.className = "agent-grid";
+
+  const agents = ["FundamentalAgent","SentimentAgent","TechnicalAgent","MarketAgent","MacroAgent"];
+  const shortNames = { FundamentalAgent:"Fund.", SentimentAgent:"Sent.", TechnicalAgent:"Tech.", MarketAgent:"Market", MacroAgent:"Macro" };
+
+  if (!agentCards[ticker]) agentCards[ticker] = {};
+
+  agents.forEach((ag) => {
+    const card = document.createElement("div");
+    card.className = "agent-card wait";
+    card.innerHTML = `
+      <div class="ac-name">${shortNames[ag]}</div>
+      <div class="ac-signal">—</div>
+      <div class="ac-status">waiting</div>
+    `;
+    grid.appendChild(card);
+    agentCards[ticker][ag] = card;
+  });
+
+  wrap.appendChild(grid);
+  chat.appendChild(wrap);
+}
+
+function updateAgentCard(agent, status, signal, round) {
+  // Find the most recently added debate grid for this agent
+  // (we use a simple approach: last ticker in pool that has this agent)
+  let card = null;
+  // iterate in insertion order, pick latest ticker
+  for (const t of Object.keys(agentCards)) {
+    if (agentCards[t][agent]) card = agentCards[t][agent];
+  }
+  if (!card) return;
+
+  const sigEl    = card.querySelector(".ac-signal");
+  const statusEl = card.querySelector(".ac-status");
+
+  if (status.startsWith("analyzing")) {
+    card.className = "agent-card busy";
+    sigEl.innerHTML = `<span class="spinner"></span>`;
+    statusEl.textContent = "analyzing…";
+  } else if (status === "done" || status.startsWith("round")) {
+    const s = (signal || "").toUpperCase();
+    card.className = `agent-card ${s === "BUY" ? "buy" : s === "SELL" ? "sell" : "busy"}`;
+    sigEl.textContent    = s || "…";
+    const label = round > 0 ? `round ${round}` : "initial";
+    statusEl.textContent = label;
+  }
+}
+
+function appendStockResult(ticker, name, results) {
+  const card = document.createElement("div");
+  card.className = "result-card";
+  card.innerHTML = `<div class="rc-header">
+    <span class="rc-ticker">${escHtml(ticker)}</span>
+    <span class="rc-name">${escHtml(name)} · Final Signals</span>
+  </div>
+  <div class="rc-rows" id="rcrows-${ticker}"></div>`;
+  chat.appendChild(card);
+
+  const rows = card.querySelector(`#rcrows-${ticker}`);
+  results.forEach((r) => {
+    const s = (r.signal || "").toUpperCase();
+    const row = document.createElement("div");
+    row.className = "rc-row";
+    row.innerHTML = `
+      <span class="profile">${escHtml(r.profile)}</span>
+      <span class="sig ${s === "BUY" ? "buy" : "sell"}">${s}</span>
+      <span class="meta">
+        <span>conviction ${r.conviction}</span>
+        <span>${r.consensus} · ${r.rounds} round(s)</span>
+      </span>`;
+    rows.appendChild(row);
+  });
+}
+
+function appendDone(pdfPath) {
+  const el = document.createElement("div");
+  el.className = "done-card";
+  el.innerHTML = `<div class="dc-title">✅ Analysis complete</div>
+    <div class="dc-sub">PDF saved → ${escHtml(pdfPath)}</div>`;
+  chat.appendChild(el);
+}
+
+function addToPool(ticker, name, results) {
+  // Use risk-averse signal as primary
+  const ra = results.find(r => r.profile === "risk-averse") || results[0];
+  stockPool[ticker] = { name, signal: ra ? ra.signal : "?" };
+  renderPool();
+}
+
+function renderPool() {
+  if (!Object.keys(stockPool).length) return;
+  poolList.innerHTML = "";
+  Object.entries(stockPool).forEach(([code, info]) => {
+    const pill = document.createElement("div");
+    pill.className = "pool-pill";
+    const s = (info.signal || "").toUpperCase();
+    pill.innerHTML = `<span class="code">${escHtml(code)}</span>
+      <span class="sig ${s === "BUY" ? "buy" : "sell"}">${s}</span>`;
+    poolList.appendChild(pill);
+  });
+}
+
+// ── Step tracker ───────────────────────────────────────────────────────────
+
+let currentStep = null;
+
+const STEP_MAP = [
+  ["step-mode",    ["proceed","How would you like"]],
+  ["step-date",    ["analysis date","date"]],
+  ["step-stocks",  ["ticker","stock #","stock code"]],
+  ["step-analyze", ["debate","agent","analyzing"]],
+  ["step-backtest",["backtest","end date"]],
+  ["step-report",  ["pdf","report","complete"]],
+];
+
+function inferStep(text) {
+  const t = text.toLowerCase();
+  for (const [id, keywords] of STEP_MAP) {
+    if (keywords.some(k => t.includes(k))) {
+      setStep(id);
+      return;
+    }
+  }
+}
+
+function setStep(id) {
+  if (currentStep === id) return;
+  // mark previous as done
+  if (currentStep) {
+    const prev = document.getElementById(currentStep);
+    if (prev) { prev.className = "step done"; }
+  }
+  currentStep = id;
+  const el = document.getElementById(id);
+  if (el) el.className = "step active";
+}
+
+// ── Utility ────────────────────────────────────────────────────────────────
+
+function escHtml(s) {
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+// initial step
+setStep("step-mode");
+</script>
+</body>
+</html>

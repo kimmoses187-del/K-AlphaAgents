@@ -48,27 +48,43 @@ class DebateManager:
             sentiment_data: str,
             technical_data: str,
             market_data: str,
-            macro_data: str) -> dict:
+            macro_data: str,
+            progress_cb=None) -> dict:
         """
         Run the full 5-agent collaboration + debate pipeline.
+
+        progress_cb(event, *args) — optional callback for web UI:
+          ('agent_update', agent_name, status, signal, round_num)
 
         Returns a dict with:
           company_name, final_signal, consensus_type
           ("unanimous" | "majority"), consensus_round, debate_log
         """
+        def _cb(agent, status, signal="", rnd=0):
+            print(f"      {agent:<20}: {status} {signal}")
+            if progress_cb:
+                progress_cb("agent_update", agent, status, signal, rnd)
+
         debate_log = []
 
         # ── Phase 1: Independent analysis ────────────────────────────────
         print("  [Round 0] Independent analysis...")
+        for agent_name in ["FundamentalAgent","SentimentAgent","TechnicalAgent","MarketAgent","MacroAgent"]:
+            _cb(agent_name, "analyzing…", "", 0)
+
         fund_r   = self.fundamental.analyze(fundamental_data, company_name)
+        _cb("FundamentalAgent", "done", fund_r["signal"], 0)
         sent_r   = self.sentiment.analyze(sentiment_data,     company_name)
+        _cb("SentimentAgent",   "done", sent_r["signal"], 0)
         tech_r   = self.technical.analyze(technical_data,     company_name)
+        _cb("TechnicalAgent",   "done", tech_r["signal"], 0)
         market_r = self.market.analyze(market_data,           company_name)
+        _cb("MarketAgent",      "done", market_r["signal"], 0)
         macro_r  = self.macro.analyze(macro_data,             company_name)
+        _cb("MacroAgent",       "done", macro_r["signal"], 0)
 
         current = [fund_r, sent_r, tech_r, market_r, macro_r]
         debate_log.append({"round": 0, "label": "Independent Analysis", "results": current})
-        self._print_signals(current)
 
         unanimous, signal = _check_unanimous(current)
         if unanimous:
@@ -81,18 +97,22 @@ class DebateManager:
 
             fund_r   = self.fundamental.update_position(
                 fundamental_data, company_name, _peers_of("FundamentalAgent", current), rnd)
+            _cb("FundamentalAgent", f"round {rnd}", fund_r["signal"], rnd)
             sent_r   = self.sentiment.update_position(
                 sentiment_data,   company_name, _peers_of("SentimentAgent",   current), rnd)
+            _cb("SentimentAgent",   f"round {rnd}", sent_r["signal"], rnd)
             tech_r   = self.technical.update_position(
                 technical_data,   company_name, _peers_of("TechnicalAgent",   current), rnd)
+            _cb("TechnicalAgent",   f"round {rnd}", tech_r["signal"], rnd)
             market_r = self.market.update_position(
                 market_data,      company_name, _peers_of("MarketAgent",      current), rnd)
+            _cb("MarketAgent",      f"round {rnd}", market_r["signal"], rnd)
             macro_r  = self.macro.update_position(
                 macro_data,       company_name, _peers_of("MacroAgent",       current), rnd)
+            _cb("MacroAgent",       f"round {rnd}", macro_r["signal"], rnd)
 
             current = [fund_r, sent_r, tech_r, market_r, macro_r]
             debate_log.append({"round": rnd, "label": f"Debate Round {rnd}", "results": current})
-            self._print_signals(current)
 
             unanimous, signal = _check_unanimous(current)
             if unanimous:

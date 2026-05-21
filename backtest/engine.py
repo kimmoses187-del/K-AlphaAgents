@@ -186,7 +186,7 @@ class BacktestEngine:
 
     def add_portfolio(self, name: str, signals: Dict[str, str],
                       custom_weights: Optional[Dict[str, float]] = None):
-        weights = custom_weights or self.portfolio_builder.build(signals)
+        weights = custom_weights if custom_weights is not None else self.portfolio_builder.build(signals)
         self.results[name] = {"weights": weights, "signals": signals}
 
     def run(self) -> Dict[str, dict]:

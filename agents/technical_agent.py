@@ -27,7 +27,7 @@ As a RISK-AVERSE analyst your priorities are:
 - Negative alpha vs both KOSPI and KOSDAQ = stock not participating in market strength
 - Bollinger %B near lower band during a downtrend confirms, not refutes, the bearish case
 - Deteriorating QoQ momentum (return worsening, vol rising) increases conviction to SELL
-- When signals are mixed or ambiguous → default to SELL
+- Recommend BUY only when the technical picture is clearly constructive — mixed or ambiguous signals should default to SELL
 
 Your analysis must cover:
 1. Price trend: direction, consistency, and position vs 20d / 60d MA

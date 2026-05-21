@@ -135,20 +135,15 @@ class BaseAgent:
     def extract_signal(self, text: str, risk_profile: str = "risk-averse") -> str:
         """Extract BUY or SELL from the LLM response.
 
-        Scans from the bottom up to catch the final RECOMMENDATION line first.
-        Tie-break: risk-averse defaults to SELL; risk-neutral defaults to BUY.
+        Looks specifically for the RECOMMENDATION line the agents are prompted
+        to write (e.g. 'RECOMMENDATION: BUY'). This avoids false matches from
+        words like 'SELL-off' or 'not a BUY signal' appearing in the body text.
+
+        Falls back to the profile default only if the agent ignored the instruction.
         """
-        for line in reversed(text.splitlines()):
-            upper = line.upper().strip()
-            if "SELL" in upper:
-                return "SELL"
-            if "BUY" in upper:
-                return "BUY"
-        # Whole-text fallback: count occurrences
-        upper_text = text.upper()
-        sell_count = upper_text.count("SELL")
-        buy_count  = upper_text.count("BUY")
-        if sell_count != buy_count:
-            return "SELL" if sell_count > buy_count else "BUY"
-        # True tie — use profile default
+        import re
+        match = re.search(r"RECOMMENDATION:\s*(BUY|SELL)", text, re.IGNORECASE)
+        if match:
+            return match.group(1).upper()
+        # Fallback — agent didn't write the expected line
         return "SELL" if risk_profile == "risk-averse" else "BUY"

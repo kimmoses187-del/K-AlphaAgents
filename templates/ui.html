@@ -460,7 +460,35 @@
     }
 
     .done-card .dc-title { font-weight: 700; margin-bottom: 4px; color: var(--buy); }
-    .done-card .dc-sub   { font-size: 12px; color: var(--muted); }
+    .done-card .dc-sub   { font-size: 12px; color: var(--muted); margin-bottom: 12px; }
+
+    .dl-buttons { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+
+    .dl-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 7px 14px;
+      border-radius: 7px;
+      font-size: 12px;
+      font-weight: 600;
+      text-decoration: none;
+      cursor: pointer;
+      transition: opacity 0.2s;
+    }
+
+    .dl-btn:hover { opacity: 0.8; }
+
+    .dl-btn.pdf {
+      background: var(--gold);
+      color: #0d1117;
+    }
+
+    .dl-btn.json {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      color: var(--text);
+    }
   </style>
 </head>
 <body>
@@ -540,6 +568,9 @@ let inputType       = "text"; // "text" | "buttons"
 // pool: {code: {name, signal_averse, signal_neutral}}
 const stockPool = {};
 
+// track signal JSON paths per ticker for download
+const signalFiles = {};
+
 // Agent card state per ticker
 const agentCards = {}; // {ticker: {agent_name: card_el}}
 
@@ -606,6 +637,8 @@ socket.on("s_stock_result", (d) => {
   progress.classList.add("hidden");
   appendStockResult(d.ticker, d.name, d.results);
   addToPool(d.ticker, d.name, d.results);
+  // store signal file path if provided
+  if (d.signal_file) signalFiles[d.ticker] = d.signal_file;
   scrollBottom();
 });
 
@@ -810,8 +843,30 @@ function appendStockResult(ticker, name, results) {
 function appendDone(pdfPath) {
   const el = document.createElement("div");
   el.className = "done-card";
-  el.innerHTML = `<div class="dc-title">✅ Analysis complete</div>
-    <div class="dc-sub">PDF saved → ${escHtml(pdfPath)}</div>`;
+
+  // Build download buttons
+  let btns = `<div class="dl-buttons">`;
+
+  if (pdfPath) {
+    btns += `<a class="dl-btn pdf" href="/download?file=${encodeURIComponent(pdfPath)}" download>
+      ⬇ Download PDF Report
+    </a>`;
+  }
+
+  // One JSON button per analyzed stock
+  Object.entries(signalFiles).forEach(([ticker, path]) => {
+    btns += `<a class="dl-btn json" href="/download?file=${encodeURIComponent(path)}" download>
+      ⬇ ${escHtml(ticker)} signals.json
+    </a>`;
+  });
+
+  btns += `</div>`;
+
+  el.innerHTML = `
+    <div class="dc-title">✅ Analysis complete</div>
+    <div class="dc-sub">Download your files below — available until the server restarts.</div>
+    ${btns}
+  `;
   chat.appendChild(el);
 }
 

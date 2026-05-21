@@ -18,7 +18,7 @@ import sys
 # Make sure the project root is importable
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from flask import Flask, render_template, request
+from flask import Flask, render_template, request, send_file, abort
 from flask_socketio import SocketIO, emit
 
 from web.session import WebSession
@@ -34,6 +34,28 @@ _sessions: dict[str, WebSession] = {}
 @app.route("/")
 def index():
     return render_template("ui.html")
+
+
+@app.route("/download")
+def download():
+    """
+    Serve a file from the reports/ directory for direct download.
+    Usage: GET /download?file=reports/Exec+Sum_2025-01-01.pdf
+    Only files inside the reports/ folder are allowed (no path traversal).
+    """
+    rel = request.args.get("file", "")
+    # Resolve to absolute path and ensure it stays inside REPORTS_DIR
+    reports_abs = os.path.realpath(os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "reports"
+    ))
+    target = os.path.realpath(os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), rel
+    ))
+    if not target.startswith(reports_abs + os.sep) and target != reports_abs:
+        abort(403)
+    if not os.path.isfile(target):
+        abort(404)
+    return send_file(target, as_attachment=True)
 
 
 @socketio.on("connect")

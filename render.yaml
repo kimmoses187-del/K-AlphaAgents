@@ -6,6 +6,17 @@ services:
     startCommand: gunicorn --worker-class geventwebsocket.gunicorn.workers.GeventWebSocketWorker -w 1 --bind 0.0.0.0:$PORT web.app:app
     plan: free
 
+    # ── Persistent disk ($1/month, 1 GB) ─────────────────────────────────────
+    # Without this, the reports/ folder is wiped every time the service restarts
+    # or redeploys (free tier also spins down after 15 min of inactivity).
+    # Uncomment the 3 lines below to keep PDFs and signal JSONs across restarts.
+    # NOTE: requires upgrading from the free plan to at least the starter plan.
+    #
+    # disk:
+    #   name: reports-disk
+    #   mountPath: /opt/render/project/src/reports
+    #   sizeGB: 1
+
     # ── Environment variables ─────────────────────────────────────────────────
     # Set the secret keys in the Render dashboard (not here).
     # The entries below just declare which env vars the app needs.

@@ -49,10 +49,12 @@ class WebSession:
             "signal": signal, "round": round_num,
         })
 
-    def stock_result(self, ticker: str, name: str, results: list):
+    def stock_result(self, ticker: str, name: str, results: list,
+                     signal_file: str = ""):
         """Send the analysis result card for a completed stock."""
         self._emit("s_stock_result", {
             "ticker": ticker, "name": name, "results": results,
+            "signal_file": signal_file,
         })
 
     def done(self, pdf_path: str = ""):

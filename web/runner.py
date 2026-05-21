@@ -9,6 +9,7 @@ Runs in a background thread per connected client.
 import glob
 import json
 import os
+import re
 from datetime import datetime
 
 from tools.dart_tools import lookup_company
@@ -149,7 +150,13 @@ def _new_analysis_flow(session, orchestrator):
                 "consensus":  dr["consensus_type"],
                 "rounds":     dr["consensus_round"],
             })
-        session.stock_result(stock_code, name, card_results)
+        # Find the signals JSON saved by orchestrator
+        date_tag = as_of_date.strftime("%Y-%m-%d")
+        pattern  = os.path.join(REPORTS_DIR, f"{stock_code}_*{date_tag}_signals.json")
+        matches  = sorted(glob.glob(pattern))
+        signal_file = matches[-1] if matches else ""
+
+        session.stock_result(stock_code, name, card_results, signal_file=signal_file)
 
         # Add more?
         ans = session.ask(

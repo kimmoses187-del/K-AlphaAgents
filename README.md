@@ -9,10 +9,10 @@ A partial replication of **BlackRock's AlphaAgents** (Zhao et al., 2025) adapted
 ## System Overview
 
 ```
-python3 main.py   (CLI)          python3 web/app.py  (Web UI)
-        │                                  │
-        ├── [N] New Analysis               └── Browser-based chat interface
-        │       │                               (same pipeline, live progress)
+python3 main.py
+        │
+        ├── [N] New Analysis
+        │       │
         │       ├── Enter as-of date  (YYYY/MM/DD)
         │       └── Enter stock pool  (one or more tickers)
         │               │
@@ -148,19 +148,12 @@ Each direct agent individually outweighs each indirect agent (0.2167 > 0.1750). 
 
 ## Portfolio Construction
 
-After all stocks are analysed, the **PortfolioAgent** constructs two separate portfolios:
+After all stocks are analysed, the **PortfolioAgent** constructs two separate portfolios — one per risk profile:
 
-| Parameter | Risk-Averse | Risk-Neutral |
-|---|---|---|
-| Equity allocation | 60% | 80% |
-| Bond allocation (KODEX 국고채3년 · 114260) | 40% | 20% |
-| Stop-loss | −5% | −10% |
-| Take-profit | +10% | +20% |
-
-- Stocks with a **SELL** signal receive **0% weight**
-- All **BUY** stocks qualify for equity allocation regardless of conviction score
-- Equity weight is distributed **conviction-proportionally** across qualifying stocks
-- Remaining weight goes to the Korean 3Y Government Bond ETF
+- **SELL** stocks receive 0% weight and are excluded from the portfolio
+- **BUY** stocks are included regardless of conviction score
+- Weight is distributed **conviction-proportionally** across all BUY stocks, summing to 100%
+- Both profiles are signal-only — no fixed equity/bond split or stop-loss rules
 
 ---
 
@@ -176,13 +169,13 @@ After all stocks are analysed, the **PortfolioAgent** constructs two separate po
 2. **KOSPI** — fetched via pykrx (green)
 3. **KOSDAQ** — fetched via pykrx (purple)
 
-Backtesting is skipped automatically if no stocks qualify for equity allocation in either profile.
+Backtesting is skipped automatically if no stocks receive a BUY signal in either profile.
 
 ---
 
 ## Output Files
 
-All outputs are saved under `reports/` with a date-organised folder structure:
+All outputs are saved under `reports/` organised by the date the analysis was **run** (not the data as-of date):
 
 ```
 reports/
@@ -225,12 +218,12 @@ alpha_agents/
 ├── render.yaml                    # Render deployment config
 │
 ├── web/                           # Web UI (Flask + SocketIO)
-│   ├── app.py                     # Flask server — run with: python3 web/app.py
+│   ├── app.py                     # Flask server
 │   ├── runner.py                  # Web-side pipeline runner
 │   └── session.py                 # Per-session state management
 │
 ├── templates/
-│   └── ui.html                    # Dark-theme chat interface (Bloomberg-inspired)
+│   └── ui.html                    # Dark-theme chat interface
 │
 ├── agents/
 │   ├── base_agent.py              # Claude (cached) + OpenAI (fallback) LLM wrapper
@@ -258,7 +251,7 @@ alpha_agents/
 │                                  #   → backtest → PDF
 │
 ├── portfolio/
-│   └── portfolio_agent.py         # Conviction scoring + risk-profile allocation
+│   └── portfolio_agent.py         # Conviction scoring + signal-based allocation
 │
 ├── backtest/
 │   ├── engine.py                  # KRX data fetcher, metrics, BacktestEngine,
@@ -276,12 +269,14 @@ alpha_agents/
 │   └── summary_renderer_demo.py   # Standalone demo with mock data
 │
 └── reports/                       # Auto-created on first run
-    └── 2025-06-01/
-        ├── 214150_클래시스/
-        │   ├── 214150_클래시스_2025-06-01_averse.md
-        │   ├── 214150_클래시스_2025-06-01_neutral.md
-        │   └── 214150_클래시스_2025-06-01.json
-        └── Exec_Sum_2025-06-01.pdf
+    └── {run_date}/                ← date the analysis was run
+        ├── {ticker_A}_{name_A}/
+        │   ├── {ticker_A}_{name_A}_{as-of}_averse.md
+        │   ├── {ticker_A}_{name_A}_{as-of}_neutral.md
+        │   └── {ticker_A}_{name_A}_{as-of}.json
+        ├── {ticker_B}_{name_B}/
+        │   └── ...
+        └── Exec_Sum_{as-of}.pdf
 ```
 
 ---
@@ -321,8 +316,6 @@ DART_API_KEY=your_opendart_key
 
 ## Usage
 
-### CLI
-
 ```bash
 python3 main.py
 ```
@@ -338,13 +331,13 @@ python3 main.py
   Enter analysis date (YYYY/MM/DD) — all stocks will be analysed using data prior to this date: 2025/06/01
 
   Stock #1
-  Enter stock ticker (e.g. 005930): 214150
+  Enter stock ticker (e.g. 005930): 005930
   → Looking up company on OpenDART...
-  → Confirmed: (주)클래시스  (214150)
+  → Confirmed: 삼성전자(주)  (005930)
   → [1/2] Fetching data...
   → [2/2] Running debates (both profiles in parallel)...
   → [RISK-AVERSE  ] BUY   conviction=0.920  (unanimous, 0 round(s))
-  → [RISK-NEUTRAL ] BUY   conviction=0.880  (unanimous, 0 round(s))
+  → [RISK-NEUTRAL ] BUY   conviction=0.960  (unanimous, 0 round(s))
 
   Add another stock to the pool? (Y/N): Y
   ...
@@ -353,7 +346,7 @@ python3 main.py
   Enter backtest end date (YYYY/MM/DD) [must be after 2025-06-01]: 2026/01/01
 
   Generating executive summary PDF...
-  [PDF] Saved → reports/2025-06-01/Exec_Sum_2025-06-01.pdf
+  [PDF] Saved → reports/2026-05-21/Exec_Sum_2025-06-01.pdf
 ```
 
 #### [L] Load Saved Signals
@@ -364,56 +357,31 @@ Skip the full analysis and go straight to portfolio construction and backtesting
   Choice (N / L): L
 
   Saved signal files (5 found):
-  [ 1] 086900  (주)메디톡스  (as_of 2025-06-01)
-  [ 2] 145020  휴젤(주)      (as_of 2025-06-01)
+  [ 1] 005930  삼성전자(주)    (as_of 2025-06-01)
+  [ 2] 000660  SK하이닉스(주)  (as_of 2025-06-01)
   ...
 
   Enter file numbers to load (e.g. 1  or  1,3,4): 1,2,3,4,5
 ```
 
-### Web UI
-
-```bash
-python3 web/app.py
-```
-
-Open `http://localhost:5001` in your browser. The web UI provides the same full analysis pipeline through a Bloomberg-inspired dark-theme chat interface, with live per-agent progress updates and real-time debate tracking.
-
----
-
-## Deployment (Render)
-
-The system deploys to [Render](https://render.com) out of the box via `render.yaml`.
-
-```yaml
-# render.yaml
-buildCommand: apt-get install -y fonts-nanum && pip install -r requirements.txt
-startCommand: python3 web/app.py
-```
-
-**Environment variables to set in Render dashboard:**
-
-| Variable | Description |
-|---|---|
-| `ANTHROPIC_API_KEY` | Anthropic API key |
-| `OPENAI_API_KEY` | OpenAI API key |
-| `DART_API_KEY` | OpenDART API key |
-
-> **Note:** Render's free tier uses an ephemeral filesystem — generated reports are lost on restart. Download the Executive Summary PDF and signal JSON files from the UI before the session ends. For persistent storage, uncomment the `disk` section in `render.yaml` (~$1/mo).
-
 ---
 
 ## Example tickers
+
+Top 10 KOSPI companies by market capitalisation:
 
 | Ticker | Company | Sector |
 |---|---|---|
 | `005930` | 삼성전자 (Samsung Electronics) | Technology |
 | `000660` | SK하이닉스 (SK Hynix) | Technology |
-| `035420` | NAVER | Communication Services |
+| `373220` | LG에너지솔루션 (LG Energy Solution) | Battery / Energy |
+| `207940` | 삼성바이오로직스 (Samsung Biologics) | Pharmaceuticals |
+| `005380` | 현대차 (Hyundai Motor) | Automotive |
+| `000270` | 기아 (Kia) | Automotive |
+| `105560` | KB금융 (KB Financial Group) | Financial |
+| `055550` | 신한지주 (Shinhan Financial Group) | Financial |
 | `068270` | 셀트리온 (Celltrion) | Healthcare |
-| `086900` | 메디톡스 | Healthcare |
-| `145020` | 휴젤 | Healthcare |
-| `214150` | 클래시스 | Healthcare |
+| `035420` | NAVER | Communication Services |
 
 ---
 
@@ -481,24 +449,6 @@ CLAUDE_MODEL=claude-haiku-4-5 python3 main.py
 
 ---
 
-## Key Formulas
-
-**Annualised Cumulative Return**
-
-$$R_{\text{annualized}} = \left(1 + R_{\text{cumulative}}\right)^{\frac{252}{n}} - 1$$
-
-**Annualised Volatility**
-
-$$\sigma_{\text{annualized}} = \sigma_{\text{daily}} \times \sqrt{252}$$
-
-**Conviction Score**
-
-$$\text{conviction} = \left(\sum_{i \in \text{agree}} w_i\right) \times 0.6 + \left(1 - \frac{r}{R_{\max}}\right) \times 0.4$$
-
-where $w_i$ = agent weight, $r$ = rounds taken, $R_{\max}$ = 3.
-
----
-
 ## Limitations
 
 - **KRX login warning:** pykrx prints a login warning on startup — this is cosmetic and does not affect data fetching. Public market data works without credentials.
@@ -506,7 +456,6 @@ where $w_i$ = agent weight, $r$ = rounds taken, $R_{\max}$ = 3.
 - **Peer mapping:** Sector peer tickers are predefined for major Korean sectors. Niche or cross-sector companies may lack ideal comparisons.
 - **yfinance ratios:** P/E and P/B ratios from yfinance are optional enrichment — many Korean stocks return N/A. Core analysis does not depend on them.
 - **LLM outputs:** Despite the multi-agent debate mechanism (which demonstrably reduces hallucination — Du et al., 2023), all outputs should be treated as research assistance, not financial advice.
-- **Ephemeral hosting:** When deployed on Render's free tier, all generated files are lost on server restart. Download outputs before ending a session.
 
 ---
 

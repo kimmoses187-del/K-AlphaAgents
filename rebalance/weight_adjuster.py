@@ -3,12 +3,12 @@ rebalance/weight_adjuster.py
 ============================
 Adjusts portfolio weights without LLM calls using momentum scores.
 
-Only re-distributes the equity bucket — bond weight absorbs any freed-up equity
-when all momentum scores are zero (full defensive tilt).
+Redistributes the full portfolio weight (1.0) among currently held BUY stocks
+proportional to their momentum scores. If all scores are zero, the portfolio
+moves to a flat (no-position) state until the next quarterly rebalance.
 """
 
 from typing import Dict
-from portfolio.portfolio_agent import BOND_TICKER
 
 
 def adjust_weights(
@@ -16,14 +16,14 @@ def adjust_weights(
     momentum_scores: Dict[str, float],
 ) -> Dict[str, float]:
     """
-    Redistribute equity budget among currently held BUY stocks
+    Redistribute portfolio weight among currently held BUY stocks
     proportional to their momentum scores.
 
     Rules
     -----
-    - Bond weight is recomputed as 1 - actual_equity (may increase if stocks are dropped)
     - Stocks with score = 0 are zeroed out until the next quarterly rebalance
-    - If all scores = 0 → 100% bond (full defensive)
+    - If all scores = 0 → all weights set to 0 (no position — full cash)
+    - Remaining stocks share 100% weight proportional to their momentum score
 
     Parameters
     ----------
@@ -32,10 +32,9 @@ def adjust_weights(
 
     Returns
     -------
-    {ticker: weight} — new full allocation summing to 1.0
+    {ticker: weight} — new stock-only allocation; BUY stocks sum to 1.0
+                       (or all zeros if no positive momentum)
     """
-    equity_budget = current_portfolio["equity_weight"]
-
     # Currently held stocks (weight > 0 from last quarterly rebalance)
     held = {
         code: alloc
@@ -51,24 +50,18 @@ def adjust_weights(
     }
 
     if not positive:
-        # Full defensive — move everything to bond
-        new_weights = {BOND_TICKER: 1.0}
-        for code in held:
-            new_weights[code] = 0.0
-        return new_weights
+        # No positive momentum — zero all held positions (full cash)
+        return {code: 0.0 for code in held}
 
     total_score = sum(positive.values())
-    new_stock_weights = {
-        code: round(equity_budget * (score / total_score), 6)
+    new_weights = {
+        code: round(score / total_score, 6)
         for code, score in positive.items()
     }
 
     # Zero out stocks that lost their momentum score
     for code in held:
-        if code not in new_stock_weights:
-            new_stock_weights[code] = 0.0
+        if code not in new_weights:
+            new_weights[code] = 0.0
 
-    actual_equity  = sum(new_stock_weights.values())
-    adjusted_bond  = round(1.0 - actual_equity, 6)
-
-    return {**new_stock_weights, BOND_TICKER: adjusted_bond}
+    return new_weights

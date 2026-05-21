@@ -19,7 +19,7 @@ from tools.market_tools import (get_company_sector_info, get_peer_comparison,
                                 format_market_data_for_llm)
 from tools.macro_tools import fetch_macro_indicators, format_macro_data_for_llm
 from debate.debate_manager import DebateManager
-from portfolio.portfolio_agent import construct_portfolio, compute_conviction, BOND_TICKER
+from portfolio.portfolio_agent import construct_portfolio, compute_conviction
 from report.report_generator import generate_report
 from report.summary_renderer import build_pdf
 from backtest.runner import run_backtest
@@ -177,17 +177,14 @@ class OrchestratorAgent:
         print(f"{'='*60}")
         for profile in PROFILES:
             po = portfolios[profile]
-            print(f"\n  [{profile.upper()}]  "
-                  f"Equity {po['equity_weight']*100:.0f}% / "
-                  f"Bond {po['bond_weight']*100:.0f}%")
+            n_buy = sum(1 for a in po["stock_allocations"].values() if a["weight"] > 0)
+            print(f"\n  [{profile.upper()}]  {n_buy} stock(s) selected")
             for code, alloc in po["stock_allocations"].items():
                 name   = company_names[code]
                 status = f"weight={alloc['weight']*100:.1f}%" if alloc["weight"] > 0 \
                          else "excluded (SELL)"
                 print(f"    {code} ({name:<15}): {alloc['signal']:<4}  "
                       f"conviction={alloc['conviction']:.3f}  {status}")
-            print(f"    Bond 114260 (KODEX 국고채3년): "
-                  f"weight={po['bond_weight']*100:.0f}%")
 
         # ── Skip backtest if no equity positions in either profile ───────
         any_equity = (
@@ -401,13 +398,11 @@ Stocks analysed: {', '.join(f"{c} ({n})" for c, n in company_names.items())}
 Per-stock results:
 {chr(10).join(stock_lines)}
 
-Risk-Averse portfolio:  {ra_po['equity_weight']*100:.0f}% equity / {ra_po['bond_weight']*100:.0f}% bond
-  Stop-loss {ra_po['stop_loss']*100:.0f}%  |  Take-profit +{ra_po['take_profit']*100:.0f}%
-  Position taken: {'Yes' if ra_po['position_taken'] else 'No — 100% bond'}
+Risk-Averse portfolio:  {sum(1 for a in ra_po['stock_allocations'].values() if a['weight']>0)} BUY stock(s) selected
+  Position taken: {'Yes' if ra_po['position_taken'] else 'No — no stocks recommended'}
 
-Risk-Neutral portfolio: {rn_po['equity_weight']*100:.0f}% equity / {rn_po['bond_weight']*100:.0f}% bond
-  Stop-loss {rn_po['stop_loss']*100:.0f}%  |  Take-profit +{rn_po['take_profit']*100:.0f}%
-  Position taken: {'Yes' if rn_po['position_taken'] else 'No — 100% bond'}
+Risk-Neutral portfolio: {sum(1 for a in rn_po['stock_allocations'].values() if a['weight']>0)} BUY stock(s) selected
+  Position taken: {'Yes' if rn_po['position_taken'] else 'No — no stocks recommended'}
 
 Write a 4–5 sentence professional cross-profile synthesis in plain prose (no bullet points, no markdown).
 Cover: (1) which stocks have strong / weak signals and why, (2) where the two profiles agree or diverge,
@@ -423,9 +418,7 @@ Cover: (1) which stocks have strong / weak signals and why, (2) where the two pr
             return resp.content[0].text.strip()
         except Exception:
             return (
-                f"Risk-Averse: equity {ra_po['equity_weight']*100:.0f}% / "
-                f"bond {ra_po['bond_weight']*100:.0f}% — "
-                f"Risk-Neutral: equity {rn_po['equity_weight']*100:.0f}% / "
-                f"bond {rn_po['bond_weight']*100:.0f}%. "
+                f"Risk-Averse: {sum(1 for a in ra_po['stock_allocations'].values() if a['weight']>0)} BUY stock(s) — "
+                f"Risk-Neutral: {sum(1 for a in rn_po['stock_allocations'].values() if a['weight']>0)} BUY stock(s). "
                 "LLM narrative unavailable — check API key."
             )

@@ -95,9 +95,6 @@ C_SUBTEXT   = colors.HexColor("#5D6D7E")
 W, H   = A4
 MARGIN = 1.5 * cm
 
-BOND_TICKER = "114260"
-BOND_NAME   = "KODEX 국고채3년"
-
 # ── Internal helpers ──────────────────────────────────────────────────────────
 
 def _fig_to_rl_image(fig, width_pt: float, height_pt: float) -> Image:
@@ -196,7 +193,6 @@ def _make_pie(profile_label: str, company_names: dict,
     """Donut pie for one risk profile, built from live portfolio data."""
     po      = portfolios[profile_key]
     allocs  = po["stock_allocations"]
-    bond_w  = po["bond_weight"]
     palette = ["#2E86C1", "#27AE60", "#8E44AD", "#E67E22", "#C0392B"]
 
     labels, sizes, clrs = [], [], []
@@ -207,20 +203,19 @@ def _make_pie(profile_label: str, company_names: dict,
             sizes.append(w)
             clrs.append(palette[i % len(palette)])
 
-    labels.append(f"Bond\n{bond_w*100:.0f}%")
-    sizes.append(bond_w)
-    clrs.append("#BDC3C7")
-
-    eq_pct = int(po["equity_weight"] * 100)
-    bd_pct = int(bond_w * 100)
+    n_buy = len(sizes)
 
     fig, ax = plt.subplots(figsize=(3.8, 3.8))
     fig.patch.set_facecolor("white")
-    ax.pie(sizes, labels=labels, colors=clrs, startangle=90,
-           wedgeprops={"edgecolor": "white", "linewidth": 2, "width": 0.55},
-           textprops={"fontsize": 7.5})
-    ax.text(0, 0, f"EQ/BD\n{eq_pct} / {bd_pct}",
-            ha="center", va="center", fontsize=8, fontweight="bold", color="#1C2833")
+    if sizes:
+        ax.pie(sizes, labels=labels, colors=clrs, startangle=90,
+               wedgeprops={"edgecolor": "white", "linewidth": 2, "width": 0.55},
+               textprops={"fontsize": 7.5})
+        ax.text(0, 0, f"{n_buy}\nstock{'s' if n_buy != 1 else ''}",
+                ha="center", va="center", fontsize=8, fontweight="bold", color="#1C2833")
+    else:
+        ax.text(0, 0, "No\nposition", ha="center", va="center",
+                fontsize=9, fontweight="bold", color="#922B21")
     ax.set_title(profile_label, fontsize=10, fontweight="bold", pad=8)
     fig.tight_layout(pad=0.4)
     return fig
@@ -287,22 +282,6 @@ def _build_signal_table(company_names: dict, portfolios: dict,
         cmds.append(("BACKGROUND", (2, i), (2, i), _badge_bg(ra["signal"])))
         cmds.append(("BACKGROUND", (5, i), (5, i), _badge_bg(rn["signal"])))
 
-    # Bond row
-    ra_bw = ra_po["bond_weight"]
-    rn_bw = rn_po["bond_weight"]
-    bond_row = [
-        Paragraph(BOND_TICKER, sty["cell"]),
-        Paragraph(BOND_NAME, sty["cell_l"]),
-        Paragraph("—", sty["cell"]), Paragraph("—", sty["cell"]),
-        Paragraph(f"{ra_bw*100:.0f}%", sty["cell"]),
-        Paragraph("—", sty["cell"]), Paragraph("—", sty["cell"]),
-        Paragraph(f"{rn_bw*100:.0f}%", sty["cell"]),
-    ]
-    bond_idx = len(data)
-    data.append(bond_row)
-    cmds.append(("BACKGROUND", (0, bond_idx), (-1, bond_idx), C_ORANGE_LT))
-    cmds.append(("FONT",       (0, bond_idx), (-1, bond_idx), KO, 8))
-
     tbl = Table(data, colWidths=col_w, repeatRows=1)
     tbl.setStyle(TableStyle(cmds))
     return tbl
@@ -312,12 +291,12 @@ def _build_profile_cards(portfolios: dict, sty: dict, usable_w: float) -> Table:
     cards = []
     for label, key in [("Risk-Averse", "risk-averse"), ("Risk-Neutral", "risk-neutral")]:
         po     = portfolios[key]
-        eq_pct = f"{po['equity_weight']*100:.0f}%"
-        bd_pct = f"{po['bond_weight']*100:.0f}%"
+        n_buy  = sum(1 for a in po["stock_allocations"].values() if a["weight"] > 0)
+        status = f"{n_buy} stock{'s' if n_buy != 1 else ''} selected" if n_buy else "No position taken"
         card_data = [
             [Paragraph(label, ParagraphStyle("ch", fontName=KOB,
                                               fontSize=9, textColor=colors.white))],
-            [Paragraph(f"Equity  {eq_pct}   Bond  {bd_pct}", sty["cell"])],
+            [Paragraph(status, sty["cell"])],
         ]
         card = Table(card_data, colWidths=[usable_w / 2 - 0.3 * cm])
         card.setStyle(TableStyle([
@@ -356,11 +335,9 @@ def _build_metrics_table(company_names: dict, portfolios: dict,
         return f"{sum(allocs[c]['conviction'] for c in codes) / len(codes):.3f}"
 
     rows = [
-        ["Metric",           "Risk-Averse",                         "Risk-Neutral"],
-        ["Stocks in Equity", f"{len(ra_in_equity)} of {n_total}",   f"{len(rn_in_equity)} of {n_total}"],
-        ["Avg Conviction",   avg_conv(ra_allocs, ra_in_equity),      avg_conv(rn_allocs, rn_in_equity)],
-        ["Equity Allocation",f"{ra_po['equity_weight']*100:.0f}%",  f"{rn_po['equity_weight']*100:.0f}%"],
-        ["Bond Allocation",  f"{ra_po['bond_weight']*100:.0f}%",    f"{rn_po['bond_weight']*100:.0f}%"],
+        ["Metric",          "Risk-Averse",                        "Risk-Neutral"],
+        ["Stocks Selected", f"{len(ra_in_equity)} of {n_total}",  f"{len(rn_in_equity)} of {n_total}"],
+        ["Avg Conviction",  avg_conv(ra_allocs, ra_in_equity),     avg_conv(rn_allocs, rn_in_equity)],
     ]
     col_w = [usable_w * 0.40, usable_w * 0.30, usable_w * 0.30]
     tbl   = Table(rows, colWidths=col_w)
@@ -407,7 +384,6 @@ def _build_rebalance_history(
     hdr = (
         [Paragraph("Quarter", hdr_style)]
         + [Paragraph(n, hdr_style) for n in names]
-        + [Paragraph(BOND_NAME, hdr_style)]
     )
 
     # ── Data rows ──
@@ -432,7 +408,6 @@ def _build_rebalance_history(
     for q in quarterly_log:
         q_label  = f"Q{q['quarter']}\n{q['start'].strftime('%Y-%m-%d')}"
         allocs   = q["portfolios"][profile]["stock_allocations"]
-        bond_w   = q["portfolios"][profile]["bond_weight"]
 
         row = [Paragraph(q_label, cell_sty)]
         for code in codes:
@@ -445,7 +420,6 @@ def _build_rebalance_history(
                 row.append(Paragraph("SELL\n—", sell_sty))
             else:
                 row.append(Paragraph("—", cell_sty))
-        row.append(Paragraph(f"{bond_w*100:.0f}%", cell_sty))
         rows.append(row)
 
     n_cols    = 2 + len(codes)
@@ -613,9 +587,8 @@ def build_pdf(
     else:
         story += _section_title(f"{bt_num}.  Backtest", sty)
         story.append(Paragraph(
-            "Backtesting was skipped — no stocks qualified for equity allocation "
-            "in either risk profile.  All capital is preserved in the Korean "
-            "3-Year Government Bond ETF (KODEX 국고채3년, 114260).",
+            "Backtesting was skipped — no stocks received a BUY recommendation "
+            "in either risk profile.",
             sty["body"],
         ))
 

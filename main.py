@@ -453,8 +453,6 @@ def _save_rebalancing_json(
     """
     def _ser_portfolio(po: dict) -> dict:
         return {
-            "equity_weight":    po["equity_weight"],
-            "bond_weight":      po["bond_weight"],
             "position_taken":   po["position_taken"],
             "weights":          dict(po["weights"]),
             "stock_allocations": {

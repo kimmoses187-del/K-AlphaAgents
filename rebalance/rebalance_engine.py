@@ -28,7 +28,7 @@ from typing import Dict, List, Optional, Tuple
 import pandas as pd
 
 from orchestrator.orchestrator_agent import OrchestratorAgent
-from portfolio.portfolio_agent import construct_portfolio, BOND_TICKER
+from portfolio.portfolio_agent import construct_portfolio
 from rebalance.event_monitor import check_triggers, compute_momentum_scores
 from rebalance.weight_adjuster import adjust_weights
 
@@ -140,11 +140,8 @@ class RebalanceEngine:
                     (q_start, dict(portfolios[profile]["weights"]))
                 )
                 po = portfolios[profile]
-                print(f"  [{profile.upper():<14}] "
-                      f"EQ {po['equity_weight']*100:.0f}% / "
-                      f"Bond {po['bond_weight']*100:.0f}%  "
-                      f"| held: "
-                      f"{sum(1 for a in po['stock_allocations'].values() if a['weight']>0)} stocks")
+                n_held = sum(1 for a in po['stock_allocations'].values() if a['weight'] > 0)
+                print(f"  [{profile.upper():<14}] {n_held} stock(s) selected")
 
             quarterly_log.append({
                 "quarter":    q_num,
@@ -212,8 +209,8 @@ class RebalanceEngine:
         start_str = q_start.strftime("%Y%m%d")
         end_str   = q_end.strftime("%Y%m%d")
 
-        # Fetch all tickers (stocks + bond ETF)
-        all_tickers = list(set(stock_codes + [BOND_TICKER]))
+        # Fetch price data for all stock tickers
+        all_tickers = list(set(stock_codes))
         raw_prices  = {}
         for ticker in all_tickers:
             try:

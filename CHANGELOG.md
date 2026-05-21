@@ -5,6 +5,44 @@ Format: `[YYYY-MM-DD] — Summary`
 
 ---
 
+## [2026-05-21] — Conviction scoring: connectedness-based agent weights
+
+### Problem with the original weights
+
+The original weights were ordered by *data hardness* (how quantitative or audited the data was):
+
+| Agent | Old weight | Rationale |
+|---|---|---|
+| FundamentalAgent | 0.30 | Hardest quantitative data |
+| TechnicalAgent | 0.25 | Direct price-signal evidence |
+| MacroAgent | 0.20 | Structural macro context |
+| MarketAgent | 0.15 | Industry positioning |
+| SentimentAgent | 0.10 | Softest / most noisy signal |
+
+This ordering made sense when agents had varying data quality. But all five agents now have substantial, structured data inputs — DART financials, pykrx metrics, disclosure feeds, macro indicators — so treating SentimentAgent's data (investor flow + short selling + DART disclosures) as worth only a third of FundamentalAgent's no longer reflects reality.
+
+### Why connectedness is a better criterion
+
+The more meaningful difference between agents is **how directly their data connects to the specific company being analysed**:
+
+- **Direct agents** draw on data that is specific to the firm: financial statements (Fundamental), corporate events and investor flows (Sentiment), and the stock's own price/volume history (Technical). If the company performs well or poorly, this data reflects it immediately.
+- **Indirect agents** draw on contextual data that surrounds the company but is not company-specific: sector cycle and peer comparisons (Market), macro environment and capital flows (Macro). This data matters, but it is one layer removed from the firm itself.
+
+Weighting by connectedness — rather than data hardness — preserves differentiation while being more defensible: it reflects how much of each agent's signal is about *this company* versus *the world around it*.
+
+### New weights (`portfolio/portfolio_agent.py`)
+
+| Group | Agents | Each weight | Group total |
+|---|---|---|---|
+| Direct | FundamentalAgent · SentimentAgent · TechnicalAgent | **0.2167** | 65% |
+| Indirect | MacroAgent · MarketAgent | **0.1750** | 35% |
+
+- Each direct agent individually outweighs each indirect agent (0.2167 > 0.1750)
+- Within each group, agents carry equal weight — no further subjective ordering
+- Weights are normalised at runtime so they sum to exactly 1.0, avoiding floating-point drift
+
+---
+
 ## [2026-05-21] — Risk profile overhaul: prompt framework + signal extraction
 
 ### 1. `extract_signal()` — fixed for both profiles (`agents/base_agent.py`)

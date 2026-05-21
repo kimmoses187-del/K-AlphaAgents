@@ -3,15 +3,21 @@ from config import MAX_DEBATE_ROUNDS
 # KODEX 국고채3년 — 3-Year Korean Government Bond ETF (KRX: 114260)
 BOND_TICKER = "114260"
 
-# Option B: expertise-weighted vote
-# Weights reflect data hardness: quantitative > qualitative
-AGENT_WEIGHTS = {
-    "FundamentalAgent": 0.30,
-    "ValuationAgent":   0.25,
-    "MacroAgent":       0.20,
-    "MarketAgent":      0.15,
-    "SentimentAgent":   0.10,
+# Conviction weighting by data connectedness to the firm.
+# Direct agents (company-specific data) share 65% total weight equally.
+# Indirect agents (sector/macro context) share 35% total weight equally.
+#   Direct  → FundamentalAgent, SentimentAgent, TechnicalAgent : 0.65 / 3 ≈ 0.2167 each
+#   Indirect → MacroAgent, MarketAgent                         : 0.35 / 2 = 0.1750 each
+# Weights are normalised so they sum to exactly 1.0.
+_raw = {
+    "FundamentalAgent": 0.65 / 3,
+    "SentimentAgent":   0.65 / 3,
+    "TechnicalAgent":   0.65 / 3,
+    "MacroAgent":       0.35 / 2,
+    "MarketAgent":      0.35 / 2,
 }
+_total = sum(_raw.values())
+AGENT_WEIGHTS = {k: v / _total for k, v in _raw.items()}
 
 PROFILE_CONFIG = {
     "risk-averse": {

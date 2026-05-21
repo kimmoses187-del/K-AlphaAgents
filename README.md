@@ -9,10 +9,10 @@ A partial replication of **BlackRock's AlphaAgents** (Zhao et al., 2025) adapted
 ## System Overview
 
 ```
-python3 main.py
-        │
-        ├── [N] New Analysis
-        │       │
+python3 main.py   (CLI)          python3 web/app.py  (Web UI)
+        │                                  │
+        ├── [N] New Analysis               └── Browser-based chat interface
+        │       │                               (same pipeline, live progress)
         │       ├── Enter as-of date  (YYYY/MM/DD)
         │       └── Enter stock pool  (one or more tickers)
         │               │
@@ -24,7 +24,8 @@ python3 main.py
         │   │    1. Fetch data  (DART + pykrx)          │
         │   │    2. Run 5-agent debate × 2 profiles     │
         │   │       (parallel)                          │
-        │   │    3. Save  .md reports + _signals.json   │
+        │   │    3. Save  .md reports + .json signals   │
+        │   │       → reports/{run_date}/{ticker}_{name}/│
         │   │                                           │
         │   │  Once all stocks analysed:                │
         │   │    4. PortfolioAgent → weights            │
@@ -32,10 +33,8 @@ python3 main.py
         │   │    6. SummaryRenderer → PDF               │
         │   └───────────────────────────────────────────┘
         │
-        ├── [L] Load Saved Signals   (skip analysis → choose backtest mode)
-        │
-        └── [C] Convert MD Reports   (convert existing .md files to _signals.json)
-        │
+        └── [L] Load Saved Signals   (skip analysis → choose backtest mode)
+
         After [N] or [L] completes, the system asks:
         │
         ├── [S] Standard Backtest    (static portfolio, single as-of date)
@@ -81,6 +80,27 @@ Each agent is independently role-prompted with the chosen risk profile and produ
 
 ---
 
+## Risk Profile Framework
+
+Each agent operates under one of two investor profiles, applied with a **two-step structure**:
+
+**Step 1 — Objective data reading:**  
+The agent reads and analyses all available data without filtering — every positive and negative signal is noted before any conclusion is formed.
+
+**Step 2 — Risk-weighted judgment:**  
+The agent applies the lens of its assigned profile when forming its final recommendation:
+
+| Profile | Tie-break rule | Interpretation |
+|---|---|---|
+| **Risk-Averse** | Risk wins | When risks and returns are of similar magnitude, the downside carries more weight → lean SELL |
+| **Risk-Neutral** | Return wins | When risks and returns are of similar magnitude, the upside carries more weight → lean BUY |
+
+This two-step approach ensures agents always consider the full picture before applying their profile weighting — avoiding the trap of selectively reading only bearish (or only bullish) signals.
+
+Both profiles run **simultaneously** via `ThreadPoolExecutor` — data is fetched once and shared.
+
+---
+
 ## Debate Mechanism
 
 ```
@@ -99,28 +119,30 @@ After Round 3 — Majority Vote
   3-of-5 wins  (5-0, 4-1, or 3-2 — no tie possible)
 ```
 
-Both risk profiles run **simultaneously** via `ThreadPoolExecutor` — data is fetched once and shared, halving wall-clock time.
-
 ---
 
 ## Conviction Scoring
 
-Conviction is computed using **Option B — Agent Expertise Weighting**:
+Conviction is computed using a weighted vote combined with a round-speed bonus:
 
 ```
 conviction = (weighted_vote × 0.6) + (round_score × 0.4)
 
-weighted_vote : sum of agent weights for agents agreeing with final signal
+weighted_vote : sum of agent weights for agents agreeing with the final signal
 round_score   : 1.0 at round 0 (instant consensus), decays to 0.0 at round 3
 ```
 
-| Agent | Weight | Rationale |
-|---|---|---|
-| FundamentalAgent | 0.30 | Hardest quantitative data |
-| TechnicalAgent | 0.25 | Direct price-signal evidence |
-| MacroAgent | 0.20 | Structural macro context |
-| MarketAgent | 0.15 | Industry positioning |
-| SentimentAgent | 0.10 | Softest / most noisy signal |
+Agents are weighted by how directly their data connects to the firm being analysed. All five agents now have substantial data inputs, so the original data-hardness ordering (Fundamental > Technical > Macro > Market > Sentiment) no longer reflects meaningful differences in data quality. Instead, weights are set by **data connectedness**:
+
+- **Direct agents** use data that is specific to the company (financial statements, corporate disclosures, investor flows, the stock's own price history).
+- **Indirect agents** use contextual data that surrounds the company (sector dynamics, macro environment) but is not company-specific.
+
+| Group | Agents | Each weight | Group total |
+|---|---|---|---|
+| **Direct** (company-specific data) | FundamentalAgent · SentimentAgent · TechnicalAgent | 0.2167 | 65% |
+| **Indirect** (sector / macro context) | MacroAgent · MarketAgent | 0.1750 | 35% |
+
+Each direct agent individually outweighs each indirect agent (0.2167 > 0.1750). Weights are normalised to sum to exactly 1.0.
 
 ---
 
@@ -160,13 +182,26 @@ Backtesting is skipped automatically if no stocks qualify for equity allocation 
 
 ## Output Files
 
-All outputs are saved to `reports/` with a consistent naming scheme:
+All outputs are saved under `reports/` with a date-organised folder structure:
 
-| File | Naming | Contents |
-|---|---|---|
-| MD report (per stock × profile) | `{ticker}_{name}_{as-of}_{averse\|neutral}.md` | Full agent analyses, debate log, signal summary |
-| Signal JSON (per stock) | `{ticker}_{name}_{as-of}_signals.json` | Structured signals for reloading without re-analysis |
-| Executive Summary PDF | `Exec Sum_{as-of}.pdf` | 2-page institutional PDF (see below) |
+```
+reports/
+└── {run_date}/                          ← date the analysis was run (YYYY-MM-DD)
+    ├── {ticker}_{name}/                 ← one folder per stock
+    │   ├── {ticker}_{name}_{as-of}_averse.md
+    │   ├── {ticker}_{name}_{as-of}_neutral.md
+    │   └── {ticker}_{name}_{as-of}.json    ← structured signals (auto-generated)
+    └── Exec_Sum_{as-of}.pdf             ← Executive Summary PDF
+```
+
+| File | Contents |
+|---|---|
+| `*_averse.md` | Full agent analyses + debate log under the Risk-Averse profile |
+| `*_neutral.md` | Full agent analyses + debate log under the Risk-Neutral profile |
+| `*.json` | Structured signals for both profiles — auto-created after every analysis run |
+| `Exec_Sum_*.pdf` | 2-page institutional PDF (see below) |
+
+Signal JSON files are created automatically after every `[N] New Analysis` run — no manual conversion step is required.
 
 ### Executive Summary PDF
 
@@ -184,9 +219,18 @@ Built with **reportlab** — institutional navy/gold design, Korean font support
 ```
 alpha_agents/
 │
-├── main.py                        # Entry point — [N] New / [L] Load / [C] Convert
+├── main.py                        # CLI entry point — [N] New / [L] Load
 ├── config.py                      # API keys, model settings, DEBUG_MODE
 ├── requirements.txt
+├── render.yaml                    # Render deployment config
+│
+├── web/                           # Web UI (Flask + SocketIO)
+│   ├── app.py                     # Flask server — run with: python3 web/app.py
+│   ├── runner.py                  # Web-side pipeline runner
+│   └── session.py                 # Per-session state management
+│
+├── templates/
+│   └── ui.html                    # Dark-theme chat interface (Bloomberg-inspired)
 │
 ├── agents/
 │   ├── base_agent.py              # Claude (cached) + OpenAI (fallback) LLM wrapper
@@ -232,10 +276,12 @@ alpha_agents/
 │   └── summary_renderer_demo.py   # Standalone demo with mock data
 │
 └── reports/                       # Auto-created on first run
-    ├── 214150_클래시스_2025-06-01_averse.md
-    ├── 214150_클래시스_2025-06-01_neutral.md
-    ├── 214150_클래시스_2025-06-01_signals.json
-    └── Exec Sum_2025-06-01.pdf
+    └── 2025-06-01/
+        ├── 214150_클래시스/
+        │   ├── 214150_클래시스_2025-06-01_averse.md
+        │   ├── 214150_클래시스_2025-06-01_neutral.md
+        │   └── 214150_클래시스_2025-06-01.json
+        └── Exec_Sum_2025-06-01.pdf
 ```
 
 ---
@@ -275,18 +321,19 @@ DART_API_KEY=your_opendart_key
 
 ## Usage
 
+### CLI
+
 ```bash
 python3 main.py
 ```
 
-### [N] New Analysis
+#### [N] New Analysis
 
 ```
   [N] New analysis        — fetch data, run agents, save signals
   [L] Load saved signals  — skip analysis, go straight to portfolio & backtest
-  [C] Convert MD reports  — convert existing .md reports to signal JSON files
 
-  Choice (N / L / C): N
+  Choice (N / L): N
 
   Enter analysis date (YYYY/MM/DD) — all stocks will be analysed using data prior to this date: 2025/06/01
 
@@ -306,15 +353,15 @@ python3 main.py
   Enter backtest end date (YYYY/MM/DD) [must be after 2025-06-01]: 2026/01/01
 
   Generating executive summary PDF...
-  [PDF] Saved → reports/Exec Sum_2025-06-01.pdf
+  [PDF] Saved → reports/2025-06-01/Exec_Sum_2025-06-01.pdf
 ```
 
-### [L] Load Saved Signals
+#### [L] Load Saved Signals
 
-Skip the full analysis and go straight to portfolio construction and backtesting using previously saved `_signals.json` files:
+Skip the full analysis and go straight to portfolio construction and backtesting using previously saved `.json` signal files:
 
 ```
-  Choice (N / L / C): L
+  Choice (N / L): L
 
   Saved signal files (5 found):
   [ 1] 086900  (주)메디톡스  (as_of 2025-06-01)
@@ -324,22 +371,39 @@ Skip the full analysis and go straight to portfolio construction and backtesting
   Enter file numbers to load (e.g. 1  or  1,3,4): 1,2,3,4,5
 ```
 
-### [C] Convert MD Reports
+### Web UI
 
-If you have existing `.md` reports from before the signal JSON feature was added, convert them without re-running the analysis:
-
-```
-  Choice (N / L / C): C
-
-  Found 5 convertible MD report pair(s):
-  [ 1] 086900  (주)메디톡스  (data as-of: 2025-06-01)
-  ...
-
-  Convert all? (A) or enter numbers (e.g. 1,3): A
-  → Converted: 086900 → reports/086900_메디톡스_2025-06-01_signals.json
+```bash
+python3 web/app.py
 ```
 
-### Example tickers
+Open `http://localhost:5001` in your browser. The web UI provides the same full analysis pipeline through a Bloomberg-inspired dark-theme chat interface, with live per-agent progress updates and real-time debate tracking.
+
+---
+
+## Deployment (Render)
+
+The system deploys to [Render](https://render.com) out of the box via `render.yaml`.
+
+```yaml
+# render.yaml
+buildCommand: apt-get install -y fonts-nanum && pip install -r requirements.txt
+startCommand: python3 web/app.py
+```
+
+**Environment variables to set in Render dashboard:**
+
+| Variable | Description |
+|---|---|
+| `ANTHROPIC_API_KEY` | Anthropic API key |
+| `OPENAI_API_KEY` | OpenAI API key |
+| `DART_API_KEY` | OpenDART API key |
+
+> **Note:** Render's free tier uses an ephemeral filesystem — generated reports are lost on restart. Download the Executive Summary PDF and signal JSON files from the UI before the session ends. For persistent storage, uncomment the `disk` section in `render.yaml` (~$1/mo).
+
+---
+
+## Example tickers
 
 | Ticker | Company | Sector |
 |---|---|---|
@@ -442,6 +506,7 @@ where $w_i$ = agent weight, $r$ = rounds taken, $R_{\max}$ = 3.
 - **Peer mapping:** Sector peer tickers are predefined for major Korean sectors. Niche or cross-sector companies may lack ideal comparisons.
 - **yfinance ratios:** P/E and P/B ratios from yfinance are optional enrichment — many Korean stocks return N/A. Core analysis does not depend on them.
 - **LLM outputs:** Despite the multi-agent debate mechanism (which demonstrably reduces hallucination — Du et al., 2023), all outputs should be treated as research assistance, not financial advice.
+- **Ephemeral hosting:** When deployed on Render's free tier, all generated files are lost on server restart. Download outputs before ending a session.
 
 ---
 

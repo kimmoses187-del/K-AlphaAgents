@@ -46,9 +46,8 @@ def _run(session):
         "How would you like to proceed?",
         input_type="buttons",
         options=[
-            {"label": "📊 New Analysis",       "value": "N"},
-            {"label": "📂 Load Saved Signals",  "value": "L"},
-            {"label": "🔄 Convert MD Reports",  "value": "C"},
+            {"label": "📊 New Analysis",      "value": "N"},
+            {"label": "📂 Load Saved Signals", "value": "L"},
         ],
     )
 
@@ -56,16 +55,11 @@ def _run(session):
 
     if mode == "N":
         all_results, as_of_date = _new_analysis_flow(session, orchestrator)
-    elif mode == "L":
+    else:
         result = _load_signals_flow(session)
         if result is None:
             return
         all_results, as_of_date = result
-    else:
-        session.message("🔄 MD conversion is available via the terminal (python3 main.py → C).",
-                        msg_type="info")
-        session.done()
-        return
 
     _post_analysis_flow(session, orchestrator, all_results, as_of_date)
 

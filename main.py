@@ -809,17 +809,12 @@ def main() -> None:
     print("="*60)
     print("\n  [N] New analysis        — fetch data, run agents, save signals")
     print("  [L] Load saved signals  — skip analysis, go straight to portfolio & backtest")
-    print("  [C] Convert MD reports  — convert existing .md reports to signal JSON files")
 
     while True:
-        choice = input("\n  Choice (N / L / C): ").strip().upper()
-        if choice in ("N", "L", "C"):
+        choice = input("\n  Choice (N / L): ").strip().upper()
+        if choice in ("N", "L"):
             break
-        print("  Please enter N, L, or C.")
-
-    if choice == "C":
-        _convert_md_to_signals_flow()
-        return
+        print("  Please enter N or L.")
 
     orchestrator = OrchestratorAgent()
 

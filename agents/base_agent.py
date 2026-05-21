@@ -1,6 +1,6 @@
 import anthropic
 import openai
-from config import ANTHROPIC_API_KEY, OPENAI_API_KEY, CLAUDE_MODEL, OPENAI_MODEL
+from config import ANTHROPIC_API_KEY, OPENAI_API_KEY, CLAUDE_MODEL, OPENAI_MODEL, DEBUG_MODE
 
 # ── Shared debate instructions ────────────────────────────────────────────────
 # Appended to every agent's system prompt so they are cached along with it.
@@ -46,6 +46,8 @@ class BaseAgent:
 
     def call_llm(self, user_message: str, max_tokens: int = 2048) -> str:
         """Call Claude with a cached system prompt; fall back to OpenAI if Claude fails."""
+        if DEBUG_MODE:
+            return f"[DEBUG STUB — {self.name}]\nNo LLM call made.\nRECOMMENDATION: BUY"
         try:
             resp = _claude.messages.create(
                 model=CLAUDE_MODEL,
@@ -88,6 +90,8 @@ class BaseAgent:
         can recognise and serve from cache on Rounds 1-3 after Round 0 writes it.
         Falls back to OpenAI with a combined single message (no caching).
         """
+        if DEBUG_MODE:
+            return f"[DEBUG STUB — {self.name}]\nNo LLM call made.\nRECOMMENDATION: BUY"
         try:
             resp = _claude.messages.create(
                 model=CLAUDE_MODEL,

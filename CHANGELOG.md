@@ -5,6 +5,21 @@ Format: `[YYYY-MM-DD] — Summary`
 
 ---
 
+## [2026-05-21] — Debug mode + model override
+
+- `config.py`
+  - `DEBUG_MODE = os.getenv("DEBUG_MODE", "false")` — skips all LLM calls when `true`
+  - `CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-6")` — overrideable via env var
+- `agents/base_agent.py` — both `call_llm()` and `call_llm_with_cache()` return a stub immediately when `DEBUG_MODE=true`; no API call is made
+
+Usage:
+```bash
+DEBUG_MODE=true python3 main.py              # zero tokens — test data pipeline only
+CLAUDE_MODEL=claude-haiku-4-5 python3 main.py  # real analysis at ~20x lower cost
+```
+
+---
+
 ## [2026-05-21] — Prompt caching (Tier 2): data blobs cached across debate rounds
 
 ### What changed

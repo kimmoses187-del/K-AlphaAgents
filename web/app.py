@@ -86,4 +86,5 @@ if __name__ == "__main__":
     print("\n  K-AlphaAgents Web UI")
     print("  ─────────────────────────────")
     print(f"  Open: http://localhost:{port}\n")
-    socketio.run(app, host="0.0.0.0", port=port, debug=False)
+    socketio.run(app, host="0.0.0.0", port=port, debug=False,
+                 allow_unsafe_werkzeug=True)

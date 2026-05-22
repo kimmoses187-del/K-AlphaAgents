@@ -5,6 +5,69 @@ Format: `[YYYY-MM-DD] — Summary`
 
 ---
 
+## [2026-05-22] — Render deployment fixed: bundled Korean font + Werkzeug flag
+
+### Problems
+
+Two separate issues were preventing the Render deployment from going live:
+
+**1. Build failure — `apt-get install -y fonts-nanum` (exit code 100)**
+
+`render.yaml` used `apt-get` to install `fonts-nanum` (NanumGothic) before running `pip`. Render's Python runtime build process runs without root access, so `apt-get` failed immediately with:
+
+```
+E: Could not open lock file /var/lib/dpkg/lock-frontend - open (13: Permission denied)
+```
+
+Additionally, the Render dashboard had this build command saved as a service-level override that took precedence over `render.yaml`.
+
+**2. Runtime crash — Werkzeug production guard (exit code 1)**
+
+After the build issue was resolved, `flask-socketio 5.6` raised:
+
+```
+RuntimeError: The Werkzeug web server is not designed to run in production.
+Pass allow_unsafe_werkzeug=True to the run() method to disable this error.
+```
+
+### Fixes
+
+**Font — bundle `NanumGothic.ttf` in the repository**
+
+- Downloaded `NanumGothic.ttf` (2 MB) from Google Fonts and committed it to `fonts/NanumGothic.ttf`
+- Updated `_find_font()` in `report/summary_renderer.py` to check the bundled path first for both `_KOREAN_FONT` and `_UNICODE_FONT`:
+  ```python
+  os.path.join(_HERE, "fonts", "NanumGothic.ttf"),   # bundled — works everywhere
+  "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",  # Linux fallback
+  "/System/Library/Fonts/Supplemental/AppleGothic.ttf" # macOS fallback
+  ```
+- Removed `apt-get install -y fonts-nanum &&` from `render.yaml` buildCommand
+- Fixed the build command in the Render dashboard (Settings → Build) to match: `pip install -r requirements.txt`
+
+**Werkzeug — add `allow_unsafe_werkzeug=True`**
+
+Updated `web/app.py` line 89:
+```python
+# Before
+socketio.run(app, host="0.0.0.0", port=port, debug=False)
+# After
+socketio.run(app, host="0.0.0.0", port=port, debug=False,
+             allow_unsafe_werkzeug=True)
+```
+
+### Result
+
+Service is live at **https://alpha-agents-su4l.onrender.com**
+
+### Files changed
+
+- `fonts/NanumGothic.ttf` — added (2 MB, bundled Korean font)
+- `report/summary_renderer.py` — `_find_font()` checks bundled path first
+- `render.yaml` — buildCommand simplified to `pip install -r requirements.txt`
+- `web/app.py` — `allow_unsafe_werkzeug=True` added to `socketio.run()`
+
+---
+
 ## [2026-05-21] — New report folder structure: run date → as-of date → stock → profile
 
 ### What changed

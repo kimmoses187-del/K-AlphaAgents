@@ -449,6 +449,41 @@ CLAUDE_MODEL=claude-haiku-4-5 python3 main.py
 
 ---
 
+## Render Deployment
+
+The web UI is hosted on Render at **https://alpha-agents-su4l.onrender.com**.
+
+### How it works
+
+- **Runtime:** Python 3 web service (`python3 web/app.py`)
+- **Build command:** `pip install -r requirements.txt` (no system-level installs needed)
+- **Korean font:** `fonts/NanumGothic.ttf` is bundled in the repository — `report/summary_renderer.py` checks this path first, so no `apt-get` is required during build
+- **SocketIO server:** runs with `allow_unsafe_werkzeug=True` (Render free tier uses Werkzeug, not gunicorn/eventlet)
+- **Free tier:** the instance spins down after 15 min of inactivity; first request after spin-down may take ~50 s to respond
+- **Persistent storage:** the free plan does not mount a persistent disk, so `reports/` is ephemeral across restarts. Upgrade to the Starter plan and uncomment the `disk:` block in `render.yaml` to keep generated PDFs and signal JSONs across deploys
+
+### Environment variables
+
+Set these in the Render dashboard (Settings → Environment):
+
+| Variable | Required | Description |
+|---|---|---|
+| `ANTHROPIC_API_KEY` | ✅ | Claude API key |
+| `OPENAI_API_KEY` | ✅ | OpenAI fallback key |
+| `DART_API_KEY` | ✅ | OpenDART API key |
+| `CLAUDE_MODEL` | optional | Override the default model (e.g. `claude-haiku-4-5`) |
+| `DEBUG_MODE` | optional | Set `true` to run without LLM calls (stub responses) |
+
+### Re-deploying
+
+Push to `main` — auto-deploy is enabled. To force a clean rebuild:
+
+```
+Render dashboard → alpha-agents → Manual Deploy → Clear build cache & deploy
+```
+
+---
+
 ## Data Sources
 
 | Agent | Primary | Fallback |

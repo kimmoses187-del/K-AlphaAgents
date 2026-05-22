@@ -27,18 +27,39 @@ class KRXDataFetcher:
         from pykrx import stock as krx
         start_dt = start.replace("-", "")
         end_dt   = end.replace("-", "")
+
+        if not tickers:
+            raise RuntimeError(
+                "fetch() called with an empty ticker list. "
+                "This usually means all stocks received SELL signals and the weight "
+                "schedule contains no invested tickers. Check rebalance engine output."
+            )
+
         key = f"krx_{','.join(sorted(tickers))}_{start}_{end}"
         if key not in self._cache:
             frames = {}
+            failed = []
             for t in tickers:
                 try:
                     df = krx.get_market_ohlcv_by_date(start_dt, end_dt, t)
                     if not df.empty:
                         frames[t] = df["종가"]
+                    else:
+                        failed.append(f"{t} (empty response)")
                 except Exception as e:
-                    print(f"[KRX] Could not fetch {t}: {e}")
+                    failed.append(f"{t} ({e})")
+                    print(f"  [KRX] Could not fetch {t}: {e}")
             if not frames:
-                raise RuntimeError("No KRX data fetched. Check ticker codes and date range.")
+                raise RuntimeError(
+                    f"No KRX price data returned for any ticker.\n"
+                    f"  Tickers tried : {tickers}\n"
+                    f"  Date range    : {start} → {end}\n"
+                    f"  Failures      : {failed}\n"
+                    f"  Check that the tickers are valid 6-digit KRX codes and that "
+                    f"the date range falls within KRX trading days."
+                )
+            if failed:
+                print(f"  [KRX] Warning: {len(failed)} ticker(s) had no data: {failed}")
             self._cache[key] = pd.DataFrame(frames).dropna(how="all")
         return self._cache[key]
 
@@ -241,8 +262,9 @@ class BacktestEngine:
         # Collect all unique tickers across the entire schedule
         all_tickers: set = set()
         for _, w in weight_schedule:
-            all_tickers.update(w.keys())
+            all_tickers.update(k for k, v in w.items() if v > 0)  # only invested tickers
 
+        print(f"  [Backtest] Fetching prices for {sorted(all_tickers)} | {self.start} → {self.end}")
         self.prices = self.fetcher.fetch(list(all_tickers), self.start, self.end)
 
         # Sort schedule ascending

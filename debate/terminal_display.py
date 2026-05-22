@@ -42,6 +42,11 @@ in-place updates.
 import sys
 import threading
 
+# Global reference to the currently active grid so that code outside this
+# module (e.g. base_agent.py) can route prints through the grid's lock
+# instead of writing directly to stdout and corrupting cursor position.
+_active_grid: "DebateGrid | None" = None
+
 # ── ANSI helpers ──────────────────────────────────────────────────────────────
 _G   = "\033[32m"   # green
 _R   = "\033[31m"   # red
@@ -70,6 +75,7 @@ class DebateGrid:
 
     def init(self) -> None:
         """Print the full static grid. Must be called from the main thread."""
+        global _active_grid
         rows = []
 
         for profile in _PROFILES:
@@ -85,6 +91,7 @@ class DebateGrid:
         for row in rows:
             sys.stdout.write(row + "\n")
         sys.stdout.flush()
+        _active_grid = self
 
         # cursor is len(rows) lines below rows[0].
         # The leading \n moves rows[0] one line down from the init start,
@@ -128,6 +135,18 @@ class DebateGrid:
             sys.stdout.write(msg + "\n")
             sys.stdout.flush()
             self._bottom += 1   # cursor moved one line further down
+
+    def print_message(self, msg: str) -> None:
+        """Print an arbitrary line below the grid without corrupting cursor math."""
+        with self._lock:
+            sys.stdout.write(msg + "\n")
+            sys.stdout.flush()
+            self._bottom += 1
+
+    def close(self) -> None:
+        """Deregister this grid as the active grid."""
+        global _active_grid
+        _active_grid = None
 
     # ── Private helpers ───────────────────────────────────────────────────────
 

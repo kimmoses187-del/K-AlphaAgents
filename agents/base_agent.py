@@ -8,6 +8,18 @@ _RETRIABLE = (anthropic.OverloadedError, anthropic.InternalServerError,
 _RETRY_DELAYS = (5, 15, 30)   # seconds between attempts 1→2, 2→3, 3→4
 
 
+def _safe_print(msg: str) -> None:
+    """Print through the DebateGrid lock when active, so cursor math stays correct."""
+    try:
+        from debate.terminal_display import _active_grid
+        if _active_grid is not None:
+            _active_grid.print_message(msg)
+            return
+    except ImportError:
+        pass
+    print(msg)
+
+
 def _claude_with_retry(fn):
     """Call fn() (a zero-arg lambda that returns a Claude response), retrying on transient errors."""
     last_err = None
@@ -18,8 +30,8 @@ def _claude_with_retry(fn):
             last_err = e
             if delay is None:
                 break
-            print(f"  [Claude] Transient error ({type(e).__name__}), retrying in {delay}s "
-                  f"(attempt {attempt + 1}/{len(_RETRY_DELAYS)})...")
+            _safe_print(f"  [Claude] Transient error ({type(e).__name__}), retrying in {delay}s "
+                        f"(attempt {attempt + 1}/{len(_RETRY_DELAYS)})...")
             time.sleep(delay)
         except Exception:
             raise   # non-retriable — bubble up immediately
@@ -84,7 +96,7 @@ class BaseAgent:
             ))
             return resp.content[0].text
         except Exception as claude_err:
-            print(f"  [{self.name}] Claude failed ({type(claude_err).__name__}), falling back to OpenAI...")
+            _safe_print(f"  [{self.name}] Claude failed ({type(claude_err).__name__}), falling back to OpenAI...")
             try:
                 resp = _openai.chat.completions.create(
                     model=OPENAI_MODEL,
@@ -138,7 +150,7 @@ class BaseAgent:
             ))
             return resp.content[0].text
         except Exception as claude_err:
-            print(f"  [{self.name}] Claude failed ({type(claude_err).__name__}), falling back to OpenAI...")
+            _safe_print(f"  [{self.name}] Claude failed ({type(claude_err).__name__}), falling back to OpenAI...")
             try:
                 resp = _openai.chat.completions.create(
                     model=OPENAI_MODEL,

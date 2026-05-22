@@ -389,11 +389,15 @@ class OrchestratorAgent:
             return profile, result
 
         results = {}
-        with ThreadPoolExecutor(max_workers=2) as pool:
-            futures = {pool.submit(_debate, p): p for p in PROFILES}
-            for future in as_completed(futures):
-                profile, result = future.result()
-                results[profile] = result
+        try:
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                futures = {pool.submit(_debate, p): p for p in PROFILES}
+                for future in as_completed(futures):
+                    profile, result = future.result()
+                    results[profile] = result
+        finally:
+            if grid is not None:
+                grid.close()
         return results
 
     def _llm_narrative(self, company_names: dict, portfolios: dict,

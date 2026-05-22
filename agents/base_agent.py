@@ -1,6 +1,29 @@
+import time
 import anthropic
 import openai
 from config import ANTHROPIC_API_KEY, OPENAI_API_KEY, CLAUDE_MODEL, OPENAI_MODEL, DEBUG_MODE
+
+_RETRIABLE = (anthropic.OverloadedError, anthropic.InternalServerError,
+              anthropic.APIConnectionError, anthropic.APITimeoutError)
+_RETRY_DELAYS = (5, 15, 30)   # seconds between attempts 1→2, 2→3, 3→4
+
+
+def _claude_with_retry(fn):
+    """Call fn() (a zero-arg lambda that returns a Claude response), retrying on transient errors."""
+    last_err = None
+    for attempt, delay in enumerate((_RETRY_DELAYS[0], _RETRY_DELAYS[1], _RETRY_DELAYS[2], None)):
+        try:
+            return fn()
+        except _RETRIABLE as e:
+            last_err = e
+            if delay is None:
+                break
+            print(f"  [Claude] Transient error ({type(e).__name__}), retrying in {delay}s "
+                  f"(attempt {attempt + 1}/{len(_RETRY_DELAYS)})...")
+            time.sleep(delay)
+        except Exception:
+            raise   # non-retriable — bubble up immediately
+    raise last_err
 
 # ── Shared debate instructions ────────────────────────────────────────────────
 # Appended to every agent's system prompt so they are cached along with it.
@@ -49,7 +72,7 @@ class BaseAgent:
         if DEBUG_MODE:
             return f"[DEBUG STUB — {self.name}]\nNo LLM call made.\nRECOMMENDATION: BUY"
         try:
-            resp = _claude.messages.create(
+            resp = _claude_with_retry(lambda: _claude.messages.create(
                 model=CLAUDE_MODEL,
                 max_tokens=max_tokens,
                 system=[{
@@ -58,7 +81,7 @@ class BaseAgent:
                     "cache_control": {"type": "ephemeral"},
                 }],
                 messages=[{"role": "user", "content": user_message}],
-            )
+            ))
             return resp.content[0].text
         except Exception as claude_err:
             print(f"  [{self.name}] Claude failed ({type(claude_err).__name__}), falling back to OpenAI...")
@@ -93,7 +116,7 @@ class BaseAgent:
         if DEBUG_MODE:
             return f"[DEBUG STUB — {self.name}]\nNo LLM call made.\nRECOMMENDATION: BUY"
         try:
-            resp = _claude.messages.create(
+            resp = _claude_with_retry(lambda: _claude.messages.create(
                 model=CLAUDE_MODEL,
                 max_tokens=max_tokens,
                 system=[{
@@ -112,7 +135,7 @@ class BaseAgent:
                         "text": dynamic_prompt,                   # ← instructions, not cached
                     },
                 ]}],
-            )
+            ))
             return resp.content[0].text
         except Exception as claude_err:
             print(f"  [{self.name}] Claude failed ({type(claude_err).__name__}), falling back to OpenAI...")

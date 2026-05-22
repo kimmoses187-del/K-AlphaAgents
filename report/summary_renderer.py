@@ -36,7 +36,9 @@ def _find_font(*candidates: str) -> str:
     )
 
 _KOREAN_FONT = _find_font(
-    # Linux (Render): apt-get install -y fonts-nanum
+    # Bundled in repo (works on Render and any platform)
+    os.path.join(_HERE, "fonts", "NanumGothic.ttf"),
+    # Linux system font (fallback if apt-installed)
     "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
     "/usr/share/fonts/nanum/NanumGothic.ttf",
     # macOS system fonts (local dev)
@@ -45,8 +47,12 @@ _KOREAN_FONT = _find_font(
 )
 
 _UNICODE_FONT = _find_font(
+    # Bundled in repo
+    os.path.join(_HERE, "fonts", "NanumGothic.ttf"),
+    # Linux system font
     "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
     "/usr/share/fonts/nanum/NanumGothic.ttf",
+    # macOS system fonts
     "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
     "/System/Library/Fonts/Supplemental/AppleGothic.ttf",
 )

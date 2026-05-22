@@ -69,7 +69,9 @@ class DebateManager:
         def _cb(agent: str, status: str, signal: str = "", rnd: int = 0):
             if display:
                 display.update_agent(profile, agent, status, signal, rnd)
-            else:
+            elif status not in ("analyzing", "analyzing…"):
+                # Skip intermediate "analyzing" states in plain terminal — they produce
+                # duplicate lines since we can't overwrite in-place without a display grid.
                 print(f"      {agent:<20}: {status} {signal}")
             if progress_cb:
                 progress_cb("agent_update", agent, status, signal, rnd, profile)

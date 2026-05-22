@@ -122,8 +122,8 @@ def _new_analysis_flow(session, orchestrator):
                 elif event == "debate_start":
                     s.debate_start(args[0], args[1])
                 elif event == "agent_update":
-                    agent, status, signal, rnd = args
-                    s.agent_update(agent, status, signal, rnd)
+                    agent, status, signal, rnd, prof = args
+                    s.agent_update(agent, status, signal, rnd, prof)
             return cb
 
         result = orchestrator.analyze_stock(

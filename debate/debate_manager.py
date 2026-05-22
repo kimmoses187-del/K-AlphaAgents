@@ -72,7 +72,7 @@ class DebateManager:
             else:
                 print(f"      {agent:<20}: {status} {signal}")
             if progress_cb:
-                progress_cb("agent_update", agent, status, signal, rnd)
+                progress_cb("agent_update", agent, status, signal, rnd, profile)
 
         def _header(rnd: int):
             if display:

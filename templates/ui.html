@@ -341,51 +341,122 @@
       margin-bottom: 4px;
     }
 
-    /* Agent cards grid */
-    .agent-grid {
-      display: grid;
-      grid-template-columns: repeat(5, 1fr);
-      gap: 8px;
-      width: 100%;
-      max-width: 680px;
-    }
-
-    .agent-card {
+    /* ── Debate card ─────────────────────────────────────────────── */
+    .debate-wrap {
       background: var(--surface2);
       border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 10px 8px;
-      text-align: center;
-      transition: border-color 0.3s;
+      border-radius: var(--radius);
+      padding: 14px 16px;
+      max-width: 680px;
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
     }
 
-    .agent-card .ac-name {
-      font-size: 10px;
-      color: var(--muted);
-      font-weight: 600;
-      margin-bottom: 6px;
-      text-transform: uppercase;
-      letter-spacing: 0.04em;
+    .debate-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
     }
 
-    .agent-card .ac-signal {
-      font-size: 15px;
+    .debate-header .dh-ticker {
+      font-size: 16px;
       font-weight: 700;
-      min-height: 22px;
+      color: var(--gold);
     }
 
-    .agent-card .ac-status {
-      font-size: 10px;
+    .debate-header .dh-name {
+      font-size: 12px;
       color: var(--muted);
-      margin-top: 3px;
     }
 
-    .agent-card.wait  { }
-    .agent-card.busy  { border-color: var(--gold); }
-    .agent-card.buy   { border-color: var(--buy); }
-    .agent-card.buy   .ac-signal { color: var(--buy); }
-    .agent-card.sell  { border-color: var(--sell); }
-    .agent-card.sell  .ac-signal { color: var(--sell); }
+    /* One block per round */
+    .round-block {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .round-label {
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      color: var(--muted);
+      padding-bottom: 4px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    /* One row per profile inside a round */
+    .profile-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .profile-label {
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      width: 80px;
+      flex-shrink: 0;
+      padding: 3px 6px;
+      border-radius: 4px;
+      text-align: center;
+    }
+
+    .profile-label.averse  { color: var(--gold);  background: rgba(240,180,41,0.10); }
+    .profile-label.neutral { color: var(--info);  background: rgba(88,166,255,0.10); }
+
+    /* 5 mini agent cards */
+    .mini-grid {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 5px;
+      flex: 1;
+    }
+
+    .mini-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 7px 5px;
+      text-align: center;
+      transition: border-color 0.25s;
+    }
+
+    .mini-card .mc-name {
+      font-size: 9px;
+      color: var(--muted);
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      margin-bottom: 4px;
+    }
+
+    .mini-card .mc-signal {
+      font-size: 12px;
+      font-weight: 800;
+      min-height: 18px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .mini-card .mc-status {
+      font-size: 9px;
+      color: var(--muted);
+      margin-top: 2px;
+    }
+
+    .mini-card.wait { }
+    .mini-card.busy { border-color: var(--gold); }
+    .mini-card.buy  { border-color: var(--buy);  background: rgba(63,185,80,0.06); }
+    .mini-card.buy  .mc-signal { color: var(--buy); }
+    .mini-card.sell { border-color: var(--sell); background: rgba(248,81,73,0.06); }
+    .mini-card.sell .mc-signal { color: var(--sell); }
 
     /* Spinner */
     .spinner {
@@ -571,8 +642,11 @@ const stockPool = {};
 // track signal JSON paths per ticker for download
 const signalFiles = {};
 
-// Agent card state per ticker
-const agentCards = {}; // {ticker: {agent_name: card_el}}
+// Agent card state per ticker → profile → round → agent → card el
+const agentCards    = {};   // [ticker][profile][round][agent] → card el
+const roundBlocks   = {};   // [ticker][round] → block el
+const debateBodies  = {};   // [ticker] → debate-body div
+let   currentTicker = null; // ticker being debated right now
 
 // ── Socket ─────────────────────────────────────────────────────────────────
 const socket = io({ transports: ["websocket"] });
@@ -630,7 +704,7 @@ socket.on("s_debate_start", (d) => {
 });
 
 socket.on("s_agent_update", (d) => {
-  updateAgentCard(d.agent, d.status, d.signal, d.round);
+  updateAgentCard(d.agent, d.status, d.signal, d.round, d.profile || "");
 });
 
 socket.on("s_stock_result", (d) => {
@@ -755,62 +829,107 @@ function appendUserBubble(text) {
   chat.appendChild(el);
 }
 
+const AGENT_SHORT = {
+  FundamentalAgent: "FUND.",
+  SentimentAgent:   "SENT.",
+  TechnicalAgent:   "TECH.",
+  MarketAgent:      "MARKET",
+  MacroAgent:       "MACRO",
+};
+const AGENTS = Object.keys(AGENT_SHORT);
+
 function appendDebateCards(ticker, name) {
+  currentTicker = ticker;
+  agentCards[ticker]   = {};   // [profile][round][agent] → card
+  roundBlocks[ticker]  = {};   // [round]  → block el
+
   const wrap = document.createElement("div");
-  wrap.className = "result-card";
-  wrap.style.marginBottom = "4px";
-  wrap.innerHTML = `<div class="rc-header">
-    <span class="rc-ticker">${escHtml(ticker)}</span>
-    <span class="rc-name">${escHtml(name)} · Agent Debate</span>
-  </div>`;
-
-  const grid = document.createElement("div");
-  grid.className = "agent-grid";
-
-  const agents = ["FundamentalAgent","SentimentAgent","TechnicalAgent","MarketAgent","MacroAgent"];
-  const shortNames = { FundamentalAgent:"Fund.", SentimentAgent:"Sent.", TechnicalAgent:"Tech.", MarketAgent:"Market", MacroAgent:"Macro" };
-
-  if (!agentCards[ticker]) agentCards[ticker] = {};
-
-  agents.forEach((ag) => {
-    const card = document.createElement("div");
-    card.className = "agent-card wait";
-    card.innerHTML = `
-      <div class="ac-name">${shortNames[ag]}</div>
-      <div class="ac-signal">—</div>
-      <div class="ac-status">waiting</div>
-    `;
-    grid.appendChild(card);
-    agentCards[ticker][ag] = card;
-  });
-
-  wrap.appendChild(grid);
+  wrap.className = "debate-wrap";
+  wrap.innerHTML = `
+    <div class="debate-header">
+      <span class="dh-ticker">${escHtml(ticker)}</span>
+      <span class="dh-name">${escHtml(name)} · Agent Debate</span>
+    </div>
+    <div class="debate-body" id="debate-body-${escHtml(ticker)}"></div>
+  `;
   chat.appendChild(wrap);
 }
 
-function updateAgentCard(agent, status, signal, round) {
-  // Find the most recently added debate grid for this agent
-  // (we use a simple approach: last ticker in pool that has this agent)
-  let card = null;
-  // iterate in insertion order, pick latest ticker
-  for (const t of Object.keys(agentCards)) {
-    if (agentCards[t][agent]) card = agentCards[t][agent];
-  }
+function _ensureRoundBlock(ticker, round) {
+  if (roundBlocks[ticker][round]) return roundBlocks[ticker][round];
+
+  const body = document.getElementById(`debate-body-${ticker}`);
+  const block = document.createElement("div");
+  block.className = "round-block";
+  const label = round === 0
+    ? "Round 0 — Independent Analysis"
+    : `Round ${round} — Debate`;
+  block.innerHTML = `<div class="round-label">${label}</div>`;
+  body.appendChild(block);
+  roundBlocks[ticker][round] = block;
+  scrollBottom();
+  return block;
+}
+
+function _ensureProfileRow(ticker, profile, round) {
+  if (!agentCards[ticker][profile]) agentCards[ticker][profile] = {};
+  if (agentCards[ticker][profile][round])
+    return agentCards[ticker][profile][round]; // already created
+
+  const block = _ensureRoundBlock(ticker, round);
+
+  const row = document.createElement("div");
+  row.className = "profile-row";
+
+  const isAverse = profile === "risk-averse";
+  const labelEl  = document.createElement("div");
+  labelEl.className = `profile-label ${isAverse ? "averse" : "neutral"}`;
+  labelEl.textContent = isAverse ? "RISK-AVERSE" : "RISK-NEUTRAL";
+  row.appendChild(labelEl);
+
+  const grid = document.createElement("div");
+  grid.className = "mini-grid";
+
+  agentCards[ticker][profile][round] = {};
+  AGENTS.forEach((ag) => {
+    const card = document.createElement("div");
+    card.className = "mini-card wait";
+    card.innerHTML = `
+      <div class="mc-name">${AGENT_SHORT[ag]}</div>
+      <div class="mc-signal">—</div>
+      <div class="mc-status"></div>
+    `;
+    grid.appendChild(card);
+    agentCards[ticker][profile][round][ag] = card;
+  });
+
+  row.appendChild(grid);
+  block.appendChild(row);
+  return agentCards[ticker][profile][round];
+}
+
+function updateAgentCard(agent, status, signal, round, profile) {
+  const ticker = currentTicker;
+  if (!ticker || !profile) return;
+
+  _ensureProfileRow(ticker, profile, round);
+
+  const card = agentCards[ticker]?.[profile]?.[round]?.[agent];
   if (!card) return;
 
-  const sigEl    = card.querySelector(".ac-signal");
-  const statusEl = card.querySelector(".ac-status");
+  const sigEl    = card.querySelector(".mc-signal");
+  const statusEl = card.querySelector(".mc-status");
 
-  if (status.startsWith("analyzing")) {
-    card.className = "agent-card busy";
-    sigEl.innerHTML = `<span class="spinner"></span>`;
-    statusEl.textContent = "analyzing…";
-  } else if (status === "done" || status.startsWith("round")) {
+  if (status === "analyzing") {
+    card.className = "mini-card busy";
+    sigEl.innerHTML      = `<span class="spinner"></span>`;
+    statusEl.textContent = "";
+  } else if (status === "done" || status === "round") {
     const s = (signal || "").toUpperCase();
-    card.className = `agent-card ${s === "BUY" ? "buy" : s === "SELL" ? "sell" : "busy"}`;
-    sigEl.textContent    = s || "…";
-    const label = round > 0 ? `round ${round}` : "initial";
-    statusEl.textContent = label;
+    const cls = s === "BUY" ? "buy" : s === "SELL" ? "sell" : "";
+    card.className       = `mini-card ${cls}`;
+    sigEl.textContent    = s || "—";
+    statusEl.textContent = s === "BUY" ? "✓" : s === "SELL" ? "✗" : "";
   }
 }
 

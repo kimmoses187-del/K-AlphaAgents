@@ -42,11 +42,12 @@ class WebSession:
         self._emit("s_debate_start", {"ticker": ticker, "name": name})
 
     def agent_update(self, agent: str, status: str,
-                     signal: str = "", round_num: int = 0):
-        """Update a single agent card."""
+                     signal: str = "", round_num: int = 0, profile: str = ""):
+        """Update a single agent card (profile disambiguates risk-averse vs risk-neutral)."""
         self._emit("s_agent_update", {
             "agent": agent, "status": status,
             "signal": signal, "round": round_num,
+            "profile": profile,
         })
 
     def stock_result(self, ticker: str, name: str, results: list,

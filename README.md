@@ -35,12 +35,16 @@ python3 main.py
         │
         └── [L] Load Saved Signals   (skip analysis → choose backtest mode)
 
-        After [N] or [L] completes, the system asks:
+        After [N] or [L] completes, the system first asks:
         │
-        ├── [S] Standard Backtest    (static portfolio, single as-of date)
-        │       Benchmarks: EW buy-and-hold · KOSPI · KOSDAQ
+        ├── [💾 Save & Exit]         signals already saved as JSON — exit now and reload later
         │
-        └── [R] Rebalancing          (quarterly LLM rebalance + event-triggered re-weighting)
+        └── [📈 Run Backtest]        proceed to portfolio construction & backtesting
+                │
+                ├── [S] Standard Backtest    (static portfolio, single as-of date)
+                │       Benchmarks: EW buy-and-hold · KOSPI · KOSDAQ
+                │
+                └── [R] Rebalancing          (quarterly LLM rebalance + event-triggered re-weighting)
                         │             Benchmarks: EW buy-and-hold · KOSPI · KOSDAQ
                         │
                         ▼
@@ -369,7 +373,13 @@ python3 main.py
   Add another stock to the pool? (Y/N): Y
   ...
 
-  Automatically starting backtest...
+  Analysis complete — proceed to backtest?
+  [📈 Run Backtest]   [💾 Save & Exit]
+
+  # Choosing Save & Exit ends the session here.
+  # Signals are already on disk — reload them later with [L] Load Saved Signals.
+
+  # Choosing Run Backtest continues:
   Enter backtest end date (YYYY/MM/DD) [must be after 2025-06-01]: 2026/01/01
 
   Generating executive summary PDF...

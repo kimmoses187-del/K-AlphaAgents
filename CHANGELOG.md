@@ -5,6 +5,35 @@ Format: `[YYYY-MM-DD] — Summary`
 
 ---
 
+## [2026-05-22] — Save & Exit breakpoint + duplicate agent output fixes
+
+### Save & Exit breakpoint (`web/runner.py`)
+
+After every analysis session (new analysis or loaded signals), the web UI now presents a pause point before the backtest:
+
+```
+Analysis complete — what would you like to do next?
+Signals are already saved and can be reloaded later via 'Load Saved Signals'
+
+  [ 📈 Run Backtest ]     [ 💾 Save & Exit ]
+```
+
+Choosing **Save & Exit** ends the session cleanly. The signal JSON files are already written to disk by the orchestrator during analysis, so no data is lost. The user can return any time, select **Load Saved Signals**, pick the saved file, and proceed straight to backtest mode. Previously the only way to stop was to complete the entire backtest flow.
+
+### Duplicate agent output fixes (`debate/debate_manager.py`)
+
+Two separate issues caused agent names to appear twice in output:
+
+**1. "Analyzing…" + result pair in terminal mode**  
+The `_cb` helper printed both the intermediate `"analyzing…"` status and the final `"done"` / `"round"` result for each agent. The intermediate state is only useful for live in-place UIs (DebateGrid or web). In plain terminal output it cannot overwrite the previous line, so each agent appeared twice.  
+Fix: skip printing when `status in ("analyzing", "analyzing…")`.
+
+**2. Parallel profiles both printing in web mode**  
+Both the risk-averse and risk-neutral `DebateManager` instances run in parallel threads. In web mode `DebateGrid` is `None`, so both threads fell through to `print()` — every agent appeared twice (once per profile) interleaved on stdout.  
+Fix: only print when `progress_cb` is also absent (`elif not progress_cb and status not in (...)`). In web mode the SocketIO callback handles all display; in terminal mode the grid handles it.
+
+---
+
 ## [2026-05-22] — Render deployment fixed: bundled Korean font + Werkzeug flag
 
 ### Problems

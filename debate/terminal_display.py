@@ -86,9 +86,10 @@ class DebateGrid:
             sys.stdout.write(row + "\n")
         sys.stdout.flush()
 
-        # cursor is now (len(rows) + 1) lines below row 0
-        # +1 for the leading \n we wrote
-        self._bottom = len(rows) + 1
+        # cursor is len(rows) lines below rows[0].
+        # The leading \n moves rows[0] one line down from the init start,
+        # but does NOT add to the distance between the cursor and rows[0].
+        self._bottom = len(rows)
 
     def update_agent(self, profile: str, agent: str,
                      status: str, signal: str = "", rnd: int = 0) -> None:

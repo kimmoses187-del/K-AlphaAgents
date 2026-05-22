@@ -3,8 +3,10 @@ import anthropic
 import openai
 from config import ANTHROPIC_API_KEY, OPENAI_API_KEY, CLAUDE_MODEL, OPENAI_MODEL, DEBUG_MODE
 
-_RETRIABLE = (anthropic.OverloadedError, anthropic.InternalServerError,
-              anthropic.APIConnectionError, anthropic.APITimeoutError)
+_RETRIABLE = (anthropic.InternalServerError,   # 500 + 529 (overloaded)
+              anthropic.RateLimitError,         # 429
+              anthropic.APIConnectionError,
+              anthropic.APITimeoutError)
 _RETRY_DELAYS = (5, 15, 30)   # seconds between attempts 1→2, 2→3, 3→4
 
 

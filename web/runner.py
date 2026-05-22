@@ -61,6 +61,24 @@ def _run(session):
             return
         all_results, as_of_date = result
 
+    proceed = session.ask(
+        "Analysis complete — what would you like to do next?",
+        subtext="Signals are already saved and can be reloaded later via 'Load Saved Signals'",
+        input_type="buttons",
+        options=[
+            {"label": "📈 Run Backtest",  "value": "Y"},
+            {"label": "💾 Save & Exit",   "value": "N"},
+        ],
+    )
+    if proceed != "Y":
+        session.message(
+            "✅ Signals saved.",
+            msg_type="success",
+            subtext="Reload them any time with 'Load Saved Signals' → choose backtest mode.",
+        )
+        session.done()
+        return
+
     _post_analysis_flow(session, orchestrator, all_results, as_of_date)
 
 

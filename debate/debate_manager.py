@@ -69,9 +69,11 @@ class DebateManager:
         def _cb(agent: str, status: str, signal: str = "", rnd: int = 0):
             if display:
                 display.update_agent(profile, agent, status, signal, rnd)
-            elif status not in ("analyzing", "analyzing…"):
-                # Skip intermediate "analyzing" states in plain terminal — they produce
-                # duplicate lines since we can't overwrite in-place without a display grid.
+            elif not progress_cb and status not in ("analyzing", "analyzing…"):
+                # Only print in plain terminal (no live grid, no web callback).
+                # Web mode: progress_cb handles display via SocketIO.
+                # Terminal mode: DebateGrid handles in-place rendering.
+                # Both suppress the "analyzing" intermediate state to avoid duplicate lines.
                 print(f"      {agent:<20}: {status} {signal}")
             if progress_cb:
                 progress_cb("agent_update", agent, status, signal, rnd, profile)

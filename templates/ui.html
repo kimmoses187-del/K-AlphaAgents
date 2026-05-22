@@ -342,121 +342,63 @@
     }
 
     /* ── Debate card ─────────────────────────────────────────────── */
-    .debate-wrap {
-      background: var(--surface2);
-      border: 1px solid var(--border);
+    /* ── Terminal-style debate grid ─────────────────────────────── */
+    .tgrid-wrap {
+      font-family: 'Menlo', 'Courier New', monospace;
+      font-size: 13px;
+      background: #010409;
+      border: 1px solid #30363d;
       border-radius: var(--radius);
-      padding: 14px 16px;
+      padding: 14px 18px;
       max-width: 680px;
       width: 100%;
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
+      line-height: 1.7;
     }
 
-    .debate-header {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-    }
-
-    .debate-header .dh-ticker {
-      font-size: 16px;
-      font-weight: 700;
+    .tgrid-ticker {
       color: var(--gold);
-    }
-
-    .debate-header .dh-name {
-      font-size: 12px;
-      color: var(--muted);
-    }
-
-    /* One block per round */
-    .round-block {
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-    }
-
-    .round-label {
-      font-size: 10px;
       font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.07em;
-      color: var(--muted);
-      padding-bottom: 4px;
-      border-bottom: 1px solid var(--border);
+      margin-bottom: 10px;
+      font-size: 13px;
     }
 
-    /* One row per profile inside a round */
-    .profile-row {
+    .tgrid-phdr {
+      font-weight: 700;
+      font-size: 13px;
+      margin-bottom: 3px;
+      margin-top: 4px;
+      white-space: nowrap;
+      overflow: hidden;
+    }
+    .tgrid-phdr.averse  { color: var(--gold); }
+    .tgrid-phdr.neutral { color: var(--info);  }
+
+    .tgrid-agents { margin-bottom: 6px; }
+
+    .tgrid-row {
       display: flex;
       align-items: center;
-      gap: 8px;
+      padding: 0 0 0 16px;
     }
 
-    .profile-label {
-      font-size: 9px;
-      font-weight: 700;
-      letter-spacing: 0.06em;
-      text-transform: uppercase;
-      width: 80px;
+    .tgrid-name {
+      color: #e6edf3;
+      width: 170px;
       flex-shrink: 0;
-      padding: 3px 6px;
-      border-radius: 4px;
-      text-align: center;
+      font-size: 13px;
     }
 
-    .profile-label.averse  { color: var(--gold);  background: rgba(240,180,41,0.10); }
-    .profile-label.neutral { color: var(--info);  background: rgba(88,166,255,0.10); }
-
-    /* 5 mini agent cards */
-    .mini-grid {
-      display: grid;
-      grid-template-columns: repeat(5, 1fr);
-      gap: 5px;
-      flex: 1;
+    .tgrid-colon {
+      color: #8b949e;
+      margin-right: 8px;
     }
 
-    .mini-card {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 7px 5px;
-      text-align: center;
-      transition: border-color 0.25s;
-    }
+    .tgrid-status { font-size: 13px; }
+    .tgrid-status.dim    { color: #8b949e; }
+    .tgrid-status.buy    { color: var(--buy);  font-weight: 700; }
+    .tgrid-status.sell   { color: var(--sell); font-weight: 700; }
 
-    .mini-card .mc-name {
-      font-size: 9px;
-      color: var(--muted);
-      font-weight: 700;
-      letter-spacing: 0.04em;
-      text-transform: uppercase;
-      margin-bottom: 4px;
-    }
-
-    .mini-card .mc-signal {
-      font-size: 12px;
-      font-weight: 800;
-      min-height: 18px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-
-    .mini-card .mc-status {
-      font-size: 9px;
-      color: var(--muted);
-      margin-top: 2px;
-    }
-
-    .mini-card.wait { }
-    .mini-card.busy { border-color: var(--gold); }
-    .mini-card.buy  { border-color: var(--buy);  background: rgba(63,185,80,0.06); }
-    .mini-card.buy  .mc-signal { color: var(--buy); }
-    .mini-card.sell { border-color: var(--sell); background: rgba(248,81,73,0.06); }
-    .mini-card.sell .mc-signal { color: var(--sell); }
+    .tgrid-sep { height: 6px; }
 
     /* Spinner */
     .spinner {
@@ -642,11 +584,10 @@ const stockPool = {};
 // track signal JSON paths per ticker for download
 const signalFiles = {};
 
-// Agent card state per ticker → profile → round → agent → card el
-const agentCards    = {};   // [ticker][profile][round][agent] → card el
-const roundBlocks   = {};   // [ticker][round] → block el
-const debateBodies  = {};   // [ticker] → debate-body div
-let   currentTicker = null; // ticker being debated right now
+// Terminal-grid debate state
+// tgridState[ticker][profile] = { hdr: <el>, agents: { AgentName: statusEl } }
+const tgridState    = {};
+let   currentTicker = null;
 
 // ── Socket ─────────────────────────────────────────────────────────────────
 const socket = io({ transports: ["websocket"] });
@@ -838,98 +779,101 @@ const AGENT_SHORT = {
 };
 const AGENTS = Object.keys(AGENT_SHORT);
 
+const _SEP  = "─".repeat(36);
+const _PROFILES_DEF = [
+  { key: "risk-averse",  cls: "averse",  label: "RISK-AVERSE"  },
+  { key: "risk-neutral", cls: "neutral", label: "RISK-NEUTRAL" },
+];
+
+function _hdrText(label, round) {
+  const phase = round === 0 ? "Independent analysis" : "Debate";
+  return `── ${label}  Round ${round} — ${phase} ${_SEP}`;
+}
+
 function appendDebateCards(ticker, name) {
   currentTicker = ticker;
-  agentCards[ticker]   = {};   // [profile][round][agent] → card
-  roundBlocks[ticker]  = {};   // [round]  → block el
+  tgridState[ticker] = {};
 
   const wrap = document.createElement("div");
-  wrap.className = "debate-wrap";
-  wrap.innerHTML = `
-    <div class="debate-header">
-      <span class="dh-ticker">${escHtml(ticker)}</span>
-      <span class="dh-name">${escHtml(name)} · Agent Debate</span>
-    </div>
-    <div class="debate-body" id="debate-body-${escHtml(ticker)}"></div>
-  `;
-  chat.appendChild(wrap);
-}
+  wrap.className = "tgrid-wrap";
 
-function _ensureRoundBlock(ticker, round) {
-  if (roundBlocks[ticker][round]) return roundBlocks[ticker][round];
+  const tickerEl = document.createElement("div");
+  tickerEl.className = "tgrid-ticker";
+  tickerEl.textContent = `${ticker} · ${name} · Agent Debate`;
+  wrap.appendChild(tickerEl);
 
-  const body = document.getElementById(`debate-body-${ticker}`);
-  const block = document.createElement("div");
-  block.className = "round-block";
-  const label = round === 0
-    ? "Round 0 — Independent Analysis"
-    : `Round ${round} — Debate`;
-  block.innerHTML = `<div class="round-label">${label}</div>`;
-  body.appendChild(block);
-  roundBlocks[ticker][round] = block;
-  scrollBottom();
-  return block;
-}
+  _PROFILES_DEF.forEach((p, i) => {
+    if (i > 0) {
+      const sep = document.createElement("div");
+      sep.className = "tgrid-sep";
+      wrap.appendChild(sep);
+    }
 
-function _ensureProfileRow(ticker, profile, round) {
-  if (!agentCards[ticker][profile]) agentCards[ticker][profile] = {};
-  if (agentCards[ticker][profile][round])
-    return agentCards[ticker][profile][round]; // already created
+    const hdr = document.createElement("div");
+    hdr.className = `tgrid-phdr ${p.cls}`;
+    hdr.textContent = _hdrText(p.label, 0);
+    wrap.appendChild(hdr);
 
-  const block = _ensureRoundBlock(ticker, round);
+    const agentsDiv = document.createElement("div");
+    agentsDiv.className = "tgrid-agents";
 
-  const row = document.createElement("div");
-  row.className = "profile-row";
+    const agentEls = {};
+    AGENTS.forEach((ag) => {
+      const row = document.createElement("div");
+      row.className = "tgrid-row";
 
-  const isAverse = profile === "risk-averse";
-  const labelEl  = document.createElement("div");
-  labelEl.className = `profile-label ${isAverse ? "averse" : "neutral"}`;
-  labelEl.textContent = isAverse ? "RISK-AVERSE" : "RISK-NEUTRAL";
-  row.appendChild(labelEl);
+      const nameEl = document.createElement("span");
+      nameEl.className = "tgrid-name";
+      nameEl.textContent = ag;
 
-  const grid = document.createElement("div");
-  grid.className = "mini-grid";
+      const colonEl = document.createElement("span");
+      colonEl.className = "tgrid-colon";
+      colonEl.textContent = ":";
 
-  agentCards[ticker][profile][round] = {};
-  AGENTS.forEach((ag) => {
-    const card = document.createElement("div");
-    card.className = "mini-card wait";
-    card.innerHTML = `
-      <div class="mc-name">${AGENT_SHORT[ag]}</div>
-      <div class="mc-signal">—</div>
-      <div class="mc-status"></div>
-    `;
-    grid.appendChild(card);
-    agentCards[ticker][profile][round][ag] = card;
+      const statusEl = document.createElement("span");
+      statusEl.className = "tgrid-status dim";
+      statusEl.innerHTML = `<span class="spinner"></span> analyzing…`;
+
+      row.appendChild(nameEl);
+      row.appendChild(colonEl);
+      row.appendChild(statusEl);
+      agentsDiv.appendChild(row);
+      agentEls[ag] = statusEl;
+    });
+
+    wrap.appendChild(agentsDiv);
+    tgridState[ticker][p.key] = { hdr, agents: agentEls };
   });
 
-  row.appendChild(grid);
-  block.appendChild(row);
-  return agentCards[ticker][profile][round];
+  chat.appendChild(wrap);
 }
 
 function updateAgentCard(agent, status, signal, round, profile) {
   const ticker = currentTicker;
   if (!ticker || !profile) return;
 
-  _ensureProfileRow(ticker, profile, round);
+  const section = tgridState[ticker]?.[profile];
+  if (!section) return;
 
-  const card = agentCards[ticker]?.[profile]?.[round]?.[agent];
-  if (!card) return;
+  // Update header for the current round
+  const label = profile === "risk-averse" ? "RISK-AVERSE" : "RISK-NEUTRAL";
+  section.hdr.textContent = _hdrText(label, round);
 
-  const sigEl    = card.querySelector(".mc-signal");
-  const statusEl = card.querySelector(".mc-status");
+  const statusEl = section.agents[agent];
+  if (!statusEl) return;
 
+  const s = (signal || "").toUpperCase();
   if (status === "analyzing") {
-    card.className = "mini-card busy";
-    sigEl.innerHTML      = `<span class="spinner"></span>`;
-    statusEl.textContent = "";
+    statusEl.className = "tgrid-status dim";
+    statusEl.innerHTML = `<span class="spinner"></span> analyzing…`;
   } else if (status === "done" || status === "round") {
-    const s = (signal || "").toUpperCase();
-    const cls = s === "BUY" ? "buy" : s === "SELL" ? "sell" : "";
-    card.className       = `mini-card ${cls}`;
-    sigEl.textContent    = s || "—";
-    statusEl.textContent = s === "BUY" ? "✓" : s === "SELL" ? "✗" : "";
+    if (s === "BUY") {
+      statusEl.className = "tgrid-status buy";
+      statusEl.textContent = "✓ BUY";
+    } else if (s === "SELL") {
+      statusEl.className = "tgrid-status sell";
+      statusEl.textContent = "✗ SELL";
+    }
   }
 }
 

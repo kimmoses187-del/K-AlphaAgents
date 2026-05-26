@@ -206,45 +206,94 @@ def _load_signals_flow(session):
         session.done()
         return None
 
-    options = []
-    metas   = []
+    # ── Build run_date → [(file_index, meta), ...] map ────────────────────────
+    def _parts(path):
+        p = path.replace("\\", "/").split("/")
+        return (p[1] if len(p) > 1 else "?",   # run_date
+                p[2] if len(p) > 2 else "?")    # as_of_date
+
+    metas = []
     for path in files:
         try:
             with open(path, encoding="utf-8") as f:
-                meta = json.load(f)
-            # Extract run_date from path: reports/{run_date}/{as_of_date}/...
-            parts   = path.replace("\\", "/").split("/")
-            run_dt  = parts[1] if len(parts) >= 2 else "?"
-            label = (f"{meta['stock_code']} · {meta['company_name']} · "
-                     f"as_of:{meta['as_of_date']}  run:{run_dt}")
+                metas.append(json.load(f))
         except Exception:
-            meta  = None
-            label = os.path.basename(path)
-        options.append({"label": label, "value": str(len(options))})
-        metas.append(meta)
+            metas.append(None)
 
-    # Use interactive checkbox picker — user selects files and clicks Confirm
+    run_map: dict[str, list] = {}
+    for i, (path, meta) in enumerate(zip(files, metas)):
+        rd, _ = _parts(path)
+        run_map.setdefault(rd, []).append((i, meta))
+    sorted_runs = sorted(run_map.keys(), reverse=True)   # newest first
+
+    # ── Step 1: pick a run_date folder ────────────────────────────────────────
+    folder_opts = []
+    for rd in sorted_runs:
+        count = len(run_map[rd])
+        folder_opts.append({
+            "label": f"📁 {rd}   ({count} signal{'s' if count != 1 else ''})",
+            "value": rd,
+        })
+
+    # Use buttons when ≤4 folders, checkboxes (single-select) otherwise
+    if len(folder_opts) <= 4:
+        chosen_run = session.ask(
+            "Select analysis run folder",
+            subtext="Each folder is one session when the analysis was executed",
+            input_type="buttons",
+            options=folder_opts,
+        )
+    else:
+        raw = session.ask(
+            f"{len(sorted_runs)} run folders found — select one to open",
+            subtext="Click a folder, then click Confirm",
+            input_type="checkboxes",
+            options=folder_opts,
+        )
+        # Take only the first selected value
+        chosen_run = raw.split(",")[0].strip()
+
+    if chosen_run not in run_map:
+        session.message("❌ Invalid folder selection.", msg_type="error")
+        session.done()
+        return None
+
+    # ── Step 2: pick tickers within that run folder ───────────────────────────
+    entries = run_map[chosen_run]   # [(file_index, meta), ...]
+    ticker_opts = []
+    for i, (file_idx, meta) in enumerate(entries):
+        _, aod = _parts(files[file_idx])
+        if meta:
+            label = (f"{meta['stock_code']} · {meta.get('company_name', '')} · "
+                     f"as_of:{aod}")
+        else:
+            label = os.path.basename(files[file_idx])
+        ticker_opts.append({"label": label, "value": str(i)})
+
     while True:
         raw = session.ask(
-            f"{len(files)} saved signal file(s) found — select files to load",
+            f"📁 {chosen_run} — select signals to load",
             subtext="Click to select, then click Confirm",
             input_type="checkboxes",
-            options=options,
+            options=ticker_opts,
         )
         try:
-            indices = [int(x.strip()) for x in raw.split(",") if x.strip()]
-            if not indices:
+            local_indices = [int(x.strip()) for x in raw.split(",") if x.strip()]
+            if not local_indices:
                 raise ValueError
             break
         except ValueError:
-            session.message("⚠ Please select at least one file.", msg_type="warning")
+            session.message("⚠ Please select at least one signal.", msg_type="warning")
 
+    # ── Load selected files ───────────────────────────────────────────────────
     all_results = {}
     as_of_date  = None
-    for idx in indices:
-        if not (0 <= idx < len(metas)) or metas[idx] is None:
+    for local_idx in local_indices:
+        if not (0 <= local_idx < len(entries)):
             continue
-        meta       = metas[idx]
+        file_idx, meta = entries[local_idx]
+        if meta is None:
+            continue
         stock_code = meta["stock_code"]
         file_date  = datetime.strptime(meta["as_of_date"], "%Y-%m-%d")
         if as_of_date is None:

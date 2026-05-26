@@ -25,38 +25,34 @@ def _ask_date(prompt: str) -> datetime:
 def _list_signal_files() -> list[str]:
     """
     Return sorted list of signal JSON files.
-    Structure: reports/{run_date}/{as_of_date}/{ticker_name}/{file}.json
-    (3 levels deep under reports/ — depth 4 total).
-    Rebalanced_*.json and Q-folder JSONs sit deeper (5–6 levels) so are
-    automatically excluded by this glob.
+    Structure: reports/signals/{ticker}_{name}/{as_of_date}/{file}.json
     """
-    return sorted(glob.glob(os.path.join(REPORTS_DIR, "*", "*", "*", "*.json")))
+    return sorted(glob.glob(os.path.join(REPORTS_DIR, "signals", "*", "*", "*.json")))
 
 
 def _pick_files_interactive(files: list[str], metas: list) -> list[int]:
     """
-    Two-level folder browser.
-      Level 0 — run_date folders   (ENTER to open, ESC to cancel)
-      Level 1 — ticker entries     (SPACE toggle, A all, ENTER confirm, ← / ESC back)
+    Two-level folder browser — company → date.
+      Level 0 — {ticker}_{name} folders  (ENTER to open, ESC cancel)
+      Level 1 — {as_of_date} entries     (SPACE toggle, A all, ENTER confirm, ← back)
     Returns list of selected 0-based file indices.
     Falls back to plain numbered input if curses is unavailable.
     """
     import curses
 
     def _path_parts(path):
-        """Return (run_date, as_of_date, ticker_name) from a file path."""
+        """Return (ticker_folder, as_of_date) from a signals/ path."""
         p = path.replace("\\", "/").split("/")
-        # reports/{run_date}/{as_of_date}/{ticker_name}/{file}.json
-        return (p[1] if len(p) > 1 else "?",
-                p[2] if len(p) > 2 else "?",
-                p[3] if len(p) > 3 else "?")
+        # reports/signals/{ticker}_{name}/{as_of_date}/{file}.json
+        return (p[2] if len(p) > 2 else "?",   # ticker folder
+                p[3] if len(p) > 3 else "?")    # as_of_date
 
-    # Build:  run_date → [(file_index, as_of_date, ticker_name, meta), ...]
-    run_map: dict[str, list] = {}
+    # Build:  ticker_folder → [(file_index, as_of_date, meta), ...]
+    ticker_map: dict[str, list] = {}
     for i, (path, meta) in enumerate(zip(files, metas)):
-        rd, aod, tkr = _path_parts(path)
-        run_map.setdefault(rd, []).append((i, aod, tkr, meta))
-    sorted_runs = sorted(run_map.keys(), reverse=True)   # newest first
+        tkr, aod = _path_parts(path)
+        ticker_map.setdefault(tkr, []).append((i, aod, meta))
+    sorted_tickers = sorted(ticker_map.keys())
 
     def _curses_browser(stdscr):
         curses.curs_set(0)
@@ -64,53 +60,56 @@ def _pick_files_interactive(files: list[str], metas: list) -> list[int]:
         curses.use_default_colors()
         curses.init_pair(1, curses.COLOR_BLACK,  curses.COLOR_YELLOW)  # cursor
         curses.init_pair(2, curses.COLOR_GREEN,  -1)                   # selected ☑
-        curses.init_pair(3, curses.COLOR_CYAN,   -1)                   # folder name
+        curses.init_pair(3, curses.COLOR_CYAN,   -1)                   # company name
 
-        level      = 0          # 0 = run folders, 1 = ticker list
-        cur_run    = None       # currently open run_date folder
+        level      = 0          # 0 = company list, 1 = date list
+        cur_ticker = None
         selected   = set()      # file indices chosen by user
         cursor     = 0
 
-        def _draw_folder_level(h, w):
-            hdr = ("  📁 reports/   "
+        def _draw_company_level(h, w):
+            hdr = ("  📁 signals/   "
                    "↑↓ navigate · ENTER open · ESC cancel")
             stdscr.addstr(0, 0, hdr[:w-1], curses.A_BOLD)
             stdscr.addstr(1, 0, "  " + "─" * min(72, w-3))
-            for i, rd in enumerate(sorted_runs):
+            for i, tkr in enumerate(sorted_tickers):
                 row = i + 2
                 if row >= h - 2:
                     break
-                count = len(run_map[rd])
-                line  = f"  📁  {rd}   ({count} signal{'s' if count != 1 else ''})"
-                attr  = (curses.color_pair(1) | curses.A_BOLD
-                         if i == cursor else curses.color_pair(3))
+                entries   = ticker_map[tkr]
+                n_dates   = len(entries)
+                n_sel     = sum(1 for e in entries if e[0] in selected)
+                sel_tag   = f"  [{n_sel} selected]" if n_sel else ""
+                # Show company name from first meta if available
+                m0 = entries[0][2]
+                display   = m0.get("company_name", tkr) if m0 else tkr
+                line      = f"  📁  {display}  ({n_dates} date{'s' if n_dates != 1 else ''}){sel_tag}"
+                attr      = (curses.color_pair(1) | curses.A_BOLD
+                             if i == cursor else curses.color_pair(3))
                 stdscr.addstr(row, 0, line[:w-1], attr)
-            foot = "  ENTER to open folder · ESC to cancel"
+            foot = "  ENTER to open · ESC to cancel"
             stdscr.addstr(h - 1, 0, foot[:w-1], curses.A_DIM)
 
-        def _draw_ticker_level(h, w):
-            hdr = (f"  📁 reports/{cur_run}/   "
-                   "↑↓ navigate · SPACE select · A all · ENTER confirm · ← back")
+        def _draw_date_level(h, w):
+            entries = ticker_map[cur_ticker]
+            m0      = entries[0][2]
+            company = m0.get("company_name", cur_ticker) if m0 else cur_ticker
+            hdr     = (f"  📁 {company}   "
+                       "↑↓ navigate · SPACE select · A all · ENTER confirm · ← back")
             stdscr.addstr(0, 0, hdr[:w-1], curses.A_BOLD)
             stdscr.addstr(1, 0, "  " + "─" * min(72, w-3))
-            entries = run_map[cur_run]
-            for i, (idx, aod, tkr, meta) in enumerate(entries):
-                row = i + 2
+            for i, (idx, aod, meta) in enumerate(entries):
+                row  = i + 2
                 if row >= h - 2:
                     break
                 mark = "☑" if idx in selected else "☐"
-                if meta:
-                    name  = meta.get("company_name", tkr)
-                    label = (f"  {mark}  {meta['stock_code']:<8} {name:<24} "
-                             f"as_of:{aod}")
-                else:
-                    label = f"  {mark}  {tkr}   as_of:{aod}"
-                attr = (curses.color_pair(1) | curses.A_BOLD
-                        if i == cursor else curses.A_NORMAL)
+                label = f"  {mark}  {aod}"
+                attr  = (curses.color_pair(1) | curses.A_BOLD
+                         if i == cursor else curses.A_NORMAL)
                 stdscr.addstr(row, 0, label[:w-1], attr)
                 if idx in selected and i != cursor:
                     stdscr.addstr(row, 2, "☑", curses.color_pair(2) | curses.A_BOLD)
-            n_sel = sum(1 for item in entries if item[0] in selected)
+            n_sel = sum(1 for e in entries if e[0] in selected)
             foot  = f"  {n_sel} selected — ENTER confirm · ← back"
             stdscr.addstr(h - 1, 0, foot[:w-1], curses.A_DIM)
 
@@ -119,11 +118,11 @@ def _pick_files_interactive(files: list[str], metas: list) -> list[int]:
             h, w = stdscr.getmaxyx()
 
             if level == 0:
-                _draw_folder_level(h, w)
-                n = len(sorted_runs)
+                _draw_company_level(h, w)
+                n = len(sorted_tickers)
             else:
-                _draw_ticker_level(h, w)
-                n = len(run_map[cur_run])
+                _draw_date_level(h, w)
+                n = len(ticker_map[cur_ticker])
 
             stdscr.refresh()
             key = stdscr.getch()
@@ -135,33 +134,32 @@ def _pick_files_interactive(files: list[str], metas: list) -> list[int]:
                 cursor = (cursor + 1) % max(1, n)
 
             elif level == 0 and key in (10, 13, curses.KEY_ENTER, curses.KEY_RIGHT):
-                cur_run = sorted_runs[cursor]
-                level   = 1
-                cursor  = 0
+                cur_ticker = sorted_tickers[cursor]
+                level      = 1
+                cursor     = 0
 
-            elif level == 0 and key == 27:          # ESC at root → cancel
+            elif level == 0 and key == 27:
                 return []
 
             elif level == 1:
                 if key == ord(' '):
-                    idx = run_map[cur_run][cursor][0]
+                    idx = ticker_map[cur_ticker][cursor][0]
                     selected.discard(idx) if idx in selected else selected.add(idx)
 
                 elif key in (ord('a'), ord('A')):
-                    run_idxs = {item[0] for item in run_map[cur_run]}
-                    if run_idxs.issubset(selected):
-                        selected -= run_idxs
+                    tkr_idxs = {e[0] for e in ticker_map[cur_ticker]}
+                    if tkr_idxs.issubset(selected):
+                        selected -= tkr_idxs
                     else:
-                        selected |= run_idxs
+                        selected |= tkr_idxs
 
                 elif key in (10, 13, curses.KEY_ENTER):
                     if selected:
                         return sorted(selected)
 
                 elif key in (curses.KEY_LEFT, curses.KEY_BACKSPACE, 27):
-                    # back to folder list, keep cursor on current run
                     level  = 0
-                    cursor = sorted_runs.index(cur_run)
+                    cursor = sorted_tickers.index(cur_ticker)
 
     try:
         return curses.wrapper(_curses_browser)
@@ -169,10 +167,9 @@ def _pick_files_interactive(files: list[str], metas: list) -> list[int]:
         # ── Fallback: plain numbered input ───────────────────────────────────
         print(f"\n  Saved signal files ({len(files)} found):")
         for i, (path, m) in enumerate(zip(files, metas)):
-            rd, aod, _ = _path_parts(path)
+            tkr, aod = _path_parts(path)
             if m:
-                print(f"  [{i+1:>2}] {m['stock_code']}  {m.get('company_name','')}  "
-                      f"as_of:{aod}  run:{rd}")
+                print(f"  [{i+1:>2}] {m['stock_code']}  {m.get('company_name','')}  as_of:{aod}")
             else:
                 print(f"  [{i+1:>2}] {os.path.basename(files[i])}")
         print()
@@ -675,10 +672,10 @@ def _run_rebalancing(
     corp_infos    = {code: r["corp_info"] for code, r in all_results.items()}
     company_names = {code: r["company_name"] for code, r in all_results.items()}
 
-    # ── Establish the run directory for all output files ──────────────────
+    # ── Establish the run directory for backtest output files ────────────
     date_tag = as_of_date.strftime("%Y-%m-%d")
     run_date = datetime.now().strftime("%Y-%m-%d")
-    run_dir  = os.path.join(REPORTS_DIR, run_date, date_tag)
+    run_dir  = os.path.join(REPORTS_DIR, "backtest", run_date, date_tag)
 
     print("\n  Rebalancing from "
           f"{as_of_date.strftime('%Y-%m-%d')} (Q1 analysis already done).")
@@ -706,7 +703,6 @@ def _run_rebalancing(
         end_date=end_date,
         use_event_triggers=use_events,
         initial_results=all_results,       # skip Q1 LLM re-run
-        run_dir=run_dir,                   # Q2+ reports go under run_dir/backtest/rebalance/
     )
 
     # ── Time-varying backtest ─────────────────────────────────────────────
@@ -753,7 +749,7 @@ def _run_rebalancing(
         )
 
     # ── PDF ───────────────────────────────────────────────────────────────
-    rebal_dir = os.path.join(run_dir, "backtest", "rebalance")
+    rebal_dir = os.path.join(run_dir, "rebalance")
     os.makedirs(rebal_dir, exist_ok=True)
     pdf_path = os.path.join(rebal_dir, f"Exec_Sum_Rebalanced_{date_tag}.pdf")
 

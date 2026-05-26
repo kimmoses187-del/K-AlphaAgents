@@ -92,20 +92,19 @@ class OrchestratorAgent:
         debate_results = self._run_debates(company_name, data, progress_cb=progress_cb)
 
         # ── Output paths ──────────────────────────────────────────────────────
-        # Structure: reports/{run_date}/{as_of_date}/{ticker}_{name}/
-        #            └── neutral/{base}_neutral.md
+        # Structure: reports/signals/{ticker}_{name}/{as_of_date}/
         #            └── averse/{base}_averse.md
+        #            └── neutral/{base}_neutral.md
         #            └── {base}.json  (combined, both profiles)
         safe_name = _safe_filename(company_name)
         date_tag  = as_of_date.strftime("%Y-%m-%d")
-        run_date  = datetime.now().strftime("%Y-%m-%d")
         base_name = f"{stock_code}_{safe_name}_{date_tag}"
 
         if output_dir is not None:
             stock_dir = output_dir
         else:
             stock_dir = os.path.join(
-                REPORTS_DIR, run_date, date_tag, f"{stock_code}_{safe_name}"
+                REPORTS_DIR, "signals", f"{stock_code}_{safe_name}", date_tag
             )
         os.makedirs(stock_dir, exist_ok=True)
 
@@ -208,7 +207,7 @@ class OrchestratorAgent:
         date_tag  = as_of_date.strftime("%Y-%m-%d")
         stock_tag = "_".join(all_results.keys())
         run_date  = datetime.now().strftime("%Y-%m-%d")
-        bh_dir    = os.path.join(REPORTS_DIR, run_date, date_tag, "backtest", "buy_and_hold")
+        bh_dir    = os.path.join(REPORTS_DIR, "backtest", run_date, date_tag, "buy_and_hold")
         os.makedirs(bh_dir, exist_ok=True)
         pdf_path  = os.path.join(bh_dir, f"Exec_Sum_{date_tag}.pdf")
 

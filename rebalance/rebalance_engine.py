@@ -137,7 +137,7 @@ class RebalanceEngine:
                 portfolios = construct_portfolio(stock_debate_results)
             else:
                 all_results, portfolios = self._run_quarter_analysis(
-                    stock_codes, corp_infos, q_start, q_num=q_num, run_dir=run_dir
+                    stock_codes, corp_infos, q_start, q_num=q_num
                 )
 
             # Quarter-start weights → schedule
@@ -180,25 +180,24 @@ class RebalanceEngine:
         corp_infos: Dict[str, dict],
         as_of_date: datetime,
         q_num: int = 1,
-        run_dir: Optional[str] = None,
     ) -> Tuple[dict, dict]:
         """Run full 5-agent debate for every stock; return (all_results, portfolios).
 
-        Q2+ reports are saved under:
-          {run_dir}/backtest/rebalance/Q{q_num}/{ticker}_{name}/
+        Q2+ signals are saved alongside Q1 under:
+          reports/signals/{ticker}_{name}/{as_of_date}/
         Q1 is never called via this path (initial_results reused by caller).
         """
         # Q1 = initial full picture (3 annual reports + all interim)
         # Q2+ = rebalancing delta (1 annual + most recent interim only)
-        stage = "initial" if q_num == 1 else "rebalancing"
+        stage    = "initial" if q_num == 1 else "rebalancing"
+        date_tag = as_of_date.strftime("%Y-%m-%d")
         all_results = {}
         for code in stock_codes:
-            # Build output_dir for Q2+ when run_dir is known
-            if run_dir is not None and q_num > 1:
+            # Q2+ signals go into signals/ just like Q1 — no backtest subfolder
+            if q_num > 1:
                 safe_name  = _safe_filename(corp_infos[code]["corp_name"])
                 output_dir = os.path.join(
-                    run_dir, "backtest", "rebalance",
-                    f"Q{q_num}", f"{code}_{safe_name}"
+                    REPORTS_DIR, "signals", f"{code}_{safe_name}", date_tag
                 )
             else:
                 output_dir = None   # default path handled by analyze_stock

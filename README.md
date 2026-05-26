@@ -25,7 +25,7 @@ python3 main.py
         │   │    2. Run 5-agent debate × 2 profiles     │
         │   │       (parallel)                          │
         │   │    3. Save  .md reports + .json signals   │
-        │   │       → reports/{run_date}/{ticker}_{name}/│
+        │   │       → reports/signals/{ticker}_{name}/  │
         │   │                                           │
         │   │  Once all stocks analysed:                │
         │   │    4. PortfolioAgent → weights            │
@@ -179,42 +179,40 @@ Backtesting is skipped automatically if no stocks receive a BUY signal in either
 
 ## Output Files
 
-All outputs are saved under `reports/` organised first by **run date** (when the analysis was executed), then by **data as-of date** (the cutoff date for all data), then by stock and risk profile:
+`reports/` is split into two clean subtrees — **signals** (all LLM outputs, always reloadable) and **backtest** (PDFs and result files):
 
 ```
 reports/
-└── {run_date}/                              ← date the analysis was run (YYYY-MM-DD)
-    └── {as_of_date}/                        ← data cutoff date entered by the user
-        ├── {ticker}_{name}/                 ← one folder per stock
-        │   ├── neutral/
-        │   │   └── {ticker}_{name}_{as-of}_neutral.md
-        │   ├── averse/
-        │   │   └── {ticker}_{name}_{as-of}_averse.md
-        │   └── {ticker}_{name}_{as-of}.json    ← signals for both profiles
-        └── backtest/
+├── signals/
+│   └── {ticker}_{name}/               ← one folder per company (Q1, Q2, Q3 all here)
+│       └── {as_of_date}/              ← data cutoff date — one per quarter analysed
+│           ├── averse/
+│           │   └── {ticker}_{name}_{as-of}_averse.md
+│           ├── neutral/
+│           │   └── {ticker}_{name}_{as-of}_neutral.md
+│           └── {ticker}_{name}_{as-of}.json   ← signals for both profiles
+│
+└── backtest/
+    └── {run_date}/                    ← date the backtest was executed
+        └── {as_of_date}/
             ├── buy_and_hold/
             │   └── Exec_Sum_{as-of}.pdf         ← Executive Summary PDF
             └── rebalance/                        ← only present if rebalancing was run
-                ├── Q2/
-                │   └── {ticker}_{name}/
-                │       ├── neutral/ ...
-                │       └── averse/  ...
-                ├── Q3/ ...
                 ├── Rebalanced_{as-of}.json       ← full weight schedule + quarterly log
                 └── Exec_Sum_Rebalanced_{as-of}.pdf
 ```
 
-Q1 analysis (the initial debate) lives at the top `{as_of_date}/{ticker}_{name}/` level.  
-Q2, Q3, … quarterly re-analyses are saved under `backtest/rebalance/Q{n}/`.
+**Q1, Q2, Q3 signals all land in `signals/{ticker}/{as_of_date}/`** — there is no separate quarterly subfolder.  
+Each quarterly as-of date (e.g. `2025-06-01`, `2025-09-01`, `2025-12-01`) gets its own date folder under the company.
 
 | File | Contents |
 |---|---|
-| `neutral/*_neutral.md` | Full agent analyses + debate log under the Risk-Neutral profile |
-| `averse/*_averse.md` | Full agent analyses + debate log under the Risk-Averse profile |
-| `*.json` | Structured signals for both profiles — auto-created after every analysis run |
-| `buy_and_hold/Exec_Sum_*.pdf` | 2-page institutional PDF (buy-and-hold backtest) |
-| `rebalance/Exec_Sum_Rebalanced_*.pdf` | 2-page institutional PDF (rebalancing backtest) |
-| `rebalance/Rebalanced_*.json` | Saved weight schedule + quarterly log for future reload |
+| `signals/…/*_neutral.md` | Full agent analyses + debate log — Risk-Neutral profile |
+| `signals/…/*_averse.md` | Full agent analyses + debate log — Risk-Averse profile |
+| `signals/…/*.json` | Structured signals for both profiles — auto-created after every run |
+| `backtest/…/Exec_Sum_*.pdf` | 2-page institutional PDF (buy-and-hold backtest) |
+| `backtest/…/Exec_Sum_Rebalanced_*.pdf` | 2-page institutional PDF (rebalancing backtest) |
+| `backtest/…/Rebalanced_*.json` | Saved weight schedule + quarterly log for future reload |
 
 Signal JSON files are created automatically after every `[N] New Analysis` run — no manual conversion step is required.
 

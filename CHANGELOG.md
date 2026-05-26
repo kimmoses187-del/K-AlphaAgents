@@ -5,6 +5,48 @@ Format: `[YYYY-MM-DD] — Summary`
 
 ---
 
+## [2026-05-26] — Company-first reports/ restructure + hierarchical file picker
+
+### New `reports/` folder layout
+
+All outputs are now split into two clean subtrees:
+
+```
+reports/
+├── signals/
+│   └── {ticker}_{name}/          ← browse by company
+│       └── {as_of_date}/         ← Q1, Q2, Q3 all land here
+│           ├── averse/ *.md
+│           ├── neutral/ *.md
+│           └── *.json
+└── backtest/
+    └── {run_date}/
+        └── {as_of_date}/
+            ├── buy_and_hold/ Exec_Sum_*.pdf
+            └── rebalance/ Rebalanced_*.json  Exec_Sum_Rebalanced_*.pdf
+```
+
+**Why:** Q2/Q3 signals were buried under `backtest/rebalance/Q2/{ticker}/` — 8 levels deep, invisible to the file picker. Now every quarterly signal (Q1, Q2, Q3…) is written to `signals/{ticker}/{as_of_date}/`, making all quarters immediately discoverable by company. Backtest PDFs and JSON weight schedules are kept strictly separate in `backtest/`.
+
+**Files changed:** `orchestrator/orchestrator_agent.py`, `rebalance/rebalance_engine.py`, `main.py`, `web/runner.py`
+
+**Migration:** `scripts/migrate_reports.py` was run to move all existing files to the new structure. Run it again on any older clone: `python3 scripts/migrate_reports.py`
+
+### Hierarchical file picker (terminal + web)
+
+**Terminal (curses):**
+- Level 0: browse companies (`signals/{ticker}/` folders) — ENTER to open
+- Level 1: select which as-of date(s) for that company — SPACE toggle, A all, ENTER confirm, ← back
+- The company name (from meta) is shown, not the raw folder name
+
+**Web:**
+- Step 1: pick a company (buttons ≤4, checkboxes >4)
+- Step 2: pick which date(s) for that company (checkboxes)
+
+Previously both pickers showed a flat list of all files, making runs with the same ticker on different dates indistinguishable.
+
+---
+
 ## [2026-05-22] — Save & Exit breakpoint + duplicate agent output fixes
 
 ### Save & Exit breakpoint (`web/runner.py`)

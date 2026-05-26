@@ -20,12 +20,15 @@ REPORTS_DIR = "reports"
 
 
 def _list_signal_files():
-    # Signal JSONs live 4 levels deep: reports/{run_date}/{as_of_date}/{ticker_name}/*.json
-    return sorted(glob.glob(os.path.join(REPORTS_DIR, "*", "*", "*", "*.json")))
+    # Signal JSONs: reports/signals/{ticker}_{name}/{as_of_date}/*.json
+    return sorted(glob.glob(os.path.join(REPORTS_DIR, "signals", "*", "*", "*.json")))
 
 
 def _list_rebalancing_files():
-    return sorted(glob.glob(os.path.join(REPORTS_DIR, "Rebalanced_*.json")))
+    # Rebalanced JSONs: reports/backtest/{run_date}/{as_of_date}/rebalance/Rebalanced_*.json
+    return sorted(glob.glob(
+        os.path.join(REPORTS_DIR, "backtest", "*", "*", "rebalance", "Rebalanced_*.json")
+    ))
 
 
 def run_web_session(session):
@@ -176,7 +179,7 @@ def _new_analysis_flow(session, orchestrator):
             })
         # Find the signals JSON saved by orchestrator (2 levels deep)
         date_tag = as_of_date.strftime("%Y-%m-%d")
-        pattern  = os.path.join(REPORTS_DIR, "*", "*", f"{stock_code}_*", f"{stock_code}_*{date_tag}.json")
+        pattern  = os.path.join(REPORTS_DIR, "signals", f"{stock_code}_*", date_tag, f"{stock_code}_*{date_tag}.json")
         matches  = sorted(glob.glob(pattern))
         signal_file = matches[-1] if matches else ""
 
@@ -209,8 +212,9 @@ def _load_signals_flow(session):
     # ── Build run_date → [(file_index, meta), ...] map ────────────────────────
     def _parts(path):
         p = path.replace("\\", "/").split("/")
-        return (p[1] if len(p) > 1 else "?",   # run_date
-                p[2] if len(p) > 2 else "?")    # as_of_date
+        # reports/signals/{ticker}_{name}/{as_of_date}/{file}.json
+        return (p[2] if len(p) > 2 else "?",   # ticker folder
+                p[3] if len(p) > 3 else "?")    # as_of_date
 
     metas = []
     for path in files:
@@ -220,62 +224,59 @@ def _load_signals_flow(session):
         except Exception:
             metas.append(None)
 
-    run_map: dict[str, list] = {}
+    # Build: ticker_folder → [(file_index, as_of_date, meta), ...]
+    ticker_map: dict[str, list] = {}
     for i, (path, meta) in enumerate(zip(files, metas)):
-        rd, _ = _parts(path)
-        run_map.setdefault(rd, []).append((i, meta))
-    sorted_runs = sorted(run_map.keys(), reverse=True)   # newest first
+        tkr, aod = _parts(path)
+        ticker_map.setdefault(tkr, []).append((i, aod, meta))
+    sorted_tickers = sorted(ticker_map.keys())
 
-    # ── Step 1: pick a run_date folder ────────────────────────────────────────
-    folder_opts = []
-    for rd in sorted_runs:
-        count = len(run_map[rd])
-        folder_opts.append({
-            "label": f"📁 {rd}   ({count} signal{'s' if count != 1 else ''})",
-            "value": rd,
+    # ── Step 1: pick a company ────────────────────────────────────────────────
+    company_opts = []
+    for tkr in sorted_tickers:
+        entries = ticker_map[tkr]
+        m0      = entries[0][2]
+        company = m0.get("company_name", tkr) if m0 else tkr
+        n_dates = len(entries)
+        company_opts.append({
+            "label": f"📁 {company}  ({n_dates} date{'s' if n_dates != 1 else ''})",
+            "value": tkr,
         })
 
-    # Use buttons when ≤4 folders, checkboxes (single-select) otherwise
-    if len(folder_opts) <= 4:
-        chosen_run = session.ask(
-            "Select analysis run folder",
-            subtext="Each folder is one session when the analysis was executed",
+    if len(company_opts) <= 4:
+        chosen_tkr = session.ask(
+            "Select a company to load signals for",
+            subtext="Browse by company, then choose which date(s)",
             input_type="buttons",
-            options=folder_opts,
+            options=company_opts,
         )
     else:
         raw = session.ask(
-            f"{len(sorted_runs)} run folders found — select one to open",
-            subtext="Click a folder, then click Confirm",
+            f"{len(sorted_tickers)} companies found — select one",
+            subtext="Click a company, then click Confirm",
             input_type="checkboxes",
-            options=folder_opts,
+            options=company_opts,
         )
-        # Take only the first selected value
-        chosen_run = raw.split(",")[0].strip()
+        chosen_tkr = raw.split(",")[0].strip()
 
-    if chosen_run not in run_map:
-        session.message("❌ Invalid folder selection.", msg_type="error")
+    if chosen_tkr not in ticker_map:
+        session.message("❌ Invalid selection.", msg_type="error")
         session.done()
         return None
 
-    # ── Step 2: pick tickers within that run folder ───────────────────────────
-    entries = run_map[chosen_run]   # [(file_index, meta), ...]
-    ticker_opts = []
-    for i, (file_idx, meta) in enumerate(entries):
-        _, aod = _parts(files[file_idx])
-        if meta:
-            label = (f"{meta['stock_code']} · {meta.get('company_name', '')} · "
-                     f"as_of:{aod}")
-        else:
-            label = os.path.basename(files[file_idx])
-        ticker_opts.append({"label": label, "value": str(i)})
+    # ── Step 2: pick which date(s) for that company ───────────────────────────
+    entries     = ticker_map[chosen_tkr]   # [(file_index, as_of_date, meta), ...]
+    date_opts   = []
+    for i, (file_idx, aod, meta) in enumerate(entries):
+        label = aod if meta is None else f"as_of: {aod}"
+        date_opts.append({"label": label, "value": str(i)})
 
     while True:
         raw = session.ask(
-            f"📁 {chosen_run} — select signals to load",
-            subtext="Click to select, then click Confirm",
+            f"📁 {chosen_tkr} — select date(s) to load",
+            subtext="Multiple dates = multi-quarter load",
             input_type="checkboxes",
-            options=ticker_opts,
+            options=date_opts,
         )
         try:
             local_indices = [int(x.strip()) for x in raw.split(",") if x.strip()]
@@ -283,7 +284,7 @@ def _load_signals_flow(session):
                 raise ValueError
             break
         except ValueError:
-            session.message("⚠ Please select at least one signal.", msg_type="warning")
+            session.message("⚠ Please select at least one date.", msg_type="warning")
 
     # ── Load selected files ───────────────────────────────────────────────────
     all_results = {}
@@ -291,7 +292,7 @@ def _load_signals_flow(session):
     for local_idx in local_indices:
         if not (0 <= local_idx < len(entries)):
             continue
-        file_idx, meta = entries[local_idx]
+        file_idx, aod, meta = entries[local_idx]
         if meta is None:
             continue
         stock_code = meta["stock_code"]
@@ -410,7 +411,10 @@ def _rebalancing_flow(session, orchestrator, all_results, as_of_date):
             start_date=as_of_date, end_date=end_date,
             all_stock_codes=stock_codes,
         )
-        pdf = f"reports/Exec Sum_Rebalanced_{as_of_date.strftime('%Y-%m-%d')}.pdf"
+        date_tag = as_of_date.strftime('%Y-%m-%d')
+        run_date = __import__('datetime').datetime.now().strftime('%Y-%m-%d')
+        pdf = os.path.join(REPORTS_DIR, "backtest", run_date, date_tag,
+                           "rebalance", f"Exec_Sum_Rebalanced_{date_tag}.pdf")
         session.message("✅ Rebalancing complete — PDF generated", msg_type="success", subtext=pdf)
         session.done(pdf_path=pdf)
     except Exception as e:

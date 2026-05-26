@@ -20,8 +20,8 @@ REPORTS_DIR = "reports"
 
 
 def _list_signal_files():
-    # Signal JSONs live 2 levels deep: reports/{run_date}/{ticker_name}/*.json
-    return sorted(glob.glob(os.path.join(REPORTS_DIR, "*", "*", "*.json")))
+    # Signal JSONs live 4 levels deep: reports/{run_date}/{as_of_date}/{ticker_name}/*.json
+    return sorted(glob.glob(os.path.join(REPORTS_DIR, "*", "*", "*", "*.json")))
 
 
 def _list_rebalancing_files():
@@ -176,7 +176,7 @@ def _new_analysis_flow(session, orchestrator):
             })
         # Find the signals JSON saved by orchestrator (2 levels deep)
         date_tag = as_of_date.strftime("%Y-%m-%d")
-        pattern  = os.path.join(REPORTS_DIR, "*", f"{stock_code}_*", f"{stock_code}_*{date_tag}.json")
+        pattern  = os.path.join(REPORTS_DIR, "*", "*", f"{stock_code}_*", f"{stock_code}_*{date_tag}.json")
         matches  = sorted(glob.glob(pattern))
         signal_file = matches[-1] if matches else ""
 

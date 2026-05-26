@@ -46,16 +46,27 @@ def _run(session):
         "How would you like to proceed?",
         input_type="buttons",
         options=[
-            {"label": "📊 New Analysis",      "value": "N"},
-            {"label": "📂 Load Saved Signals", "value": "L"},
+            {"label": "📊 New Analysis",         "value": "N"},
+            {"label": "📂 Load Saved Signals",    "value": "L"},
+            {"label": "⚡ Load & Run Backtest",   "value": "B"},
         ],
     )
 
     orchestrator = OrchestratorAgent()
 
+    # ── Load & Run Backtest shortcut ──────────────────────────────────────────
+    if mode == "B":
+        result = _load_signals_flow(session)
+        if result is None:
+            return
+        all_results, as_of_date = result
+        _post_analysis_flow(session, orchestrator, all_results, as_of_date)
+        return
+
+    # ── New analysis ──────────────────────────────────────────────────────────
     if mode == "N":
         all_results, as_of_date = _new_analysis_flow(session, orchestrator)
-    else:
+    else:  # mode == "L"
         result = _load_signals_flow(session)
         if result is None:
             return
@@ -63,7 +74,7 @@ def _run(session):
 
     proceed = session.ask(
         "Analysis complete — what would you like to do next?",
-        subtext="Signals are already saved and can be reloaded later via 'Load Saved Signals'",
+        subtext="Signals are already saved and can be reloaded later via 'Load & Run Backtest'",
         input_type="buttons",
         options=[
             {"label": "📈 Run Backtest",  "value": "Y"},
@@ -74,7 +85,7 @@ def _run(session):
         session.message(
             "✅ Signals saved.",
             msg_type="success",
-            subtext="Reload them any time with 'Load Saved Signals' → choose backtest mode.",
+            subtext="Reload them any time with 'Load & Run Backtest'.",
         )
         session.done()
         return
@@ -208,21 +219,21 @@ def _load_signals_flow(session):
         options.append({"label": label, "value": str(len(options))})
         metas.append(meta)
 
-    session.message(
-        f"{len(files)} saved signal file(s) found",
-        msg_type="info",
-        subtext="\n".join(f"[{i+1}] {o['label']}" for i, o in enumerate(options)),
-    )
-
+    # Use interactive checkbox picker — user selects files and clicks Confirm
     while True:
-        raw = session.ask("Enter file numbers to load (e.g. 1  or  1,3,4)")
+        raw = session.ask(
+            f"{len(files)} saved signal file(s) found — select files to load",
+            subtext="Click to select, then click Confirm",
+            input_type="checkboxes",
+            options=options,
+        )
         try:
-            indices = [int(x.strip()) - 1 for x in raw.split(",") if x.strip()]
+            indices = [int(x.strip()) for x in raw.split(",") if x.strip()]
             if not indices:
                 raise ValueError
             break
         except ValueError:
-            session.message("⚠ Enter comma-separated numbers.", msg_type="warning")
+            session.message("⚠ Please select at least one file.", msg_type="warning")
 
     all_results = {}
     as_of_date  = None

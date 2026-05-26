@@ -292,6 +292,95 @@
       color: var(--gold);
     }
 
+    /* ── Checkbox file picker ────────────────────────────────────── */
+    #checkbox-panel {
+      border-top: 1px solid var(--border);
+      background: var(--surface);
+      padding: 10px 20px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      max-height: 280px;
+      overflow: hidden;
+    }
+
+    #checkbox-list {
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      max-height: 210px;
+    }
+
+    .cb-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 7px 10px;
+      border-radius: 7px;
+      border: 1px solid var(--border);
+      background: var(--surface2);
+      cursor: pointer;
+      transition: border-color 0.15s, background 0.15s;
+      font-size: 13px;
+      user-select: none;
+    }
+
+    .cb-item:hover   { border-color: var(--gold); background: rgba(240,180,41,0.06); }
+    .cb-item.selected {
+      border-color: var(--gold);
+      background: rgba(240,180,41,0.10);
+    }
+
+    .cb-box {
+      width: 16px; height: 16px;
+      border: 2px solid var(--border);
+      border-radius: 4px;
+      flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 11px;
+      transition: border-color 0.15s, background 0.15s;
+    }
+    .cb-item.selected .cb-box {
+      border-color: var(--gold);
+      background: var(--gold);
+      color: #0d1117;
+    }
+
+    .cb-label { color: var(--text); flex: 1; }
+    .cb-meta  { font-size: 11px; color: var(--muted); white-space: nowrap; }
+
+    #checkbox-actions {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    #cb-select-all {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      color: var(--muted);
+      font-size: 12px;
+      padding: 6px 12px;
+      cursor: pointer;
+    }
+    #cb-select-all:hover { border-color: var(--gold); color: var(--gold); }
+
+    #cb-confirm {
+      background: var(--gold);
+      border: none;
+      border-radius: 7px;
+      color: #0d1117;
+      font-size: 13px;
+      font-weight: 700;
+      padding: 7px 18px;
+      cursor: pointer;
+      transition: opacity 0.2s;
+    }
+    #cb-confirm:disabled { opacity: 0.35; cursor: default; }
+    #cb-confirm:not(:disabled):hover { opacity: 0.85; }
+
     /* ── Chat bubbles ─────────────────────────────────────────────── */
     .bubble {
       max-width: 680px;
@@ -555,6 +644,15 @@
     <!-- Button options (shown when server sends buttons) -->
     <div id="buttons-row"></div>
 
+    <!-- Checkbox file picker (shown when server sends checkboxes) -->
+    <div id="checkbox-panel" style="display:none;">
+      <div id="checkbox-list"></div>
+      <div id="checkbox-actions">
+        <button id="cb-select-all">Select All</button>
+        <button id="cb-confirm" disabled>✓ Confirm Selection</button>
+      </div>
+    </div>
+
     <!-- Text input bar -->
     <div id="inputbar">
       <input id="text-input" type="text" placeholder="Waiting for connection…" disabled />
@@ -569,6 +667,10 @@
 const chat       = document.getElementById("chat");
 const progress   = document.getElementById("progress-strip");
 const btnRow     = document.getElementById("buttons-row");
+const cbPanel    = document.getElementById("checkbox-panel");
+const cbList     = document.getElementById("checkbox-list");
+const cbConfirm  = document.getElementById("cb-confirm");
+const cbSelectAll= document.getElementById("cb-select-all");
 const textInput  = document.getElementById("text-input");
 const sendBtn    = document.getElementById("send-btn");
 const statusDot  = document.getElementById("status-dot");
@@ -576,7 +678,7 @@ const statusText = document.getElementById("status-text");
 const poolList   = document.getElementById("pool-list");
 
 let waitingForInput = false;  // true while server is blocking on ask()
-let inputType       = "text"; // "text" | "buttons"
+let inputType       = "text"; // "text" | "buttons" | "checkboxes"
 
 // pool: {code: {name, signal_averse, signal_neutral}}
 const stockPool = {};
@@ -623,6 +725,9 @@ socket.on("s_question", (d) => {
   if (inputType === "buttons") {
     showButtons(d.options || []);
     setInputMode("buttons");
+  } else if (inputType === "checkboxes") {
+    showCheckboxes(d.options || []);
+    setInputMode("checkboxes");
   } else {
     setInputMode("text", d.text);
   }
@@ -681,6 +786,7 @@ function sendValue(value) {
 
   // Reset UI
   hideButtons();
+  hideCheckboxes();
   setInputMode("idle");
   textInput.value = "";
   statusDot.className    = "working";
@@ -703,20 +809,28 @@ textInput.addEventListener("keydown", (e) => {
 // ── UI helpers ─────────────────────────────────────────────────────────────
 
 function setInputMode(mode, placeholder = "") {
+  // hide everything first
+  hideButtons();
+  hideCheckboxes();
   if (mode === "text") {
-    textInput.disabled  = false;
+    textInput.disabled    = false;
     textInput.placeholder = placeholder || "Type your answer…";
-    sendBtn.disabled    = false;
+    sendBtn.disabled      = false;
     textInput.focus();
   } else if (mode === "buttons") {
-    textInput.disabled  = true;
+    textInput.disabled    = true;
     textInput.placeholder = "Click an option above…";
-    sendBtn.disabled    = true;
+    sendBtn.disabled      = true;
+  } else if (mode === "checkboxes") {
+    textInput.disabled    = true;
+    textInput.placeholder = "Select files above, then click Confirm…";
+    sendBtn.disabled      = true;
+    // cbPanel shown by showCheckboxes() — don't double-show here
   } else {
     // idle
-    textInput.disabled  = true;
+    textInput.disabled    = true;
     textInput.placeholder = "";
-    sendBtn.disabled    = true;
+    sendBtn.disabled      = true;
   }
 }
 
@@ -735,6 +849,80 @@ function showButtons(options) {
 function hideButtons() {
   btnRow.style.display = "none";
   btnRow.innerHTML = "";
+}
+
+function showCheckboxes(options) {
+  cbList.innerHTML = "";
+  const selected = new Set();
+
+  function updateConfirm() {
+    cbConfirm.disabled = selected.size === 0;
+    cbSelectAll.textContent = selected.size === options.length ? "Deselect All" : "Select All";
+  }
+
+  options.forEach((opt) => {
+    const item = document.createElement("div");
+    item.className = "cb-item";
+
+    // Parse label: "CODE · Name · Date" → show code+name on left, date on right
+    const parts = opt.label.split(" · ");
+    const main  = parts.slice(0, 2).join(" · ");
+    const meta  = parts[2] || "";
+
+    item.innerHTML = `
+      <div class="cb-box"></div>
+      <span class="cb-label">${escHtml(main)}</span>
+      <span class="cb-meta">${escHtml(meta)}</span>
+    `;
+
+    item.addEventListener("click", () => {
+      if (selected.has(opt.value)) {
+        selected.delete(opt.value);
+        item.classList.remove("selected");
+        item.querySelector(".cb-box").textContent = "";
+      } else {
+        selected.add(opt.value);
+        item.classList.add("selected");
+        item.querySelector(".cb-box").textContent = "✓";
+      }
+      updateConfirm();
+    });
+
+    cbList.appendChild(item);
+  });
+
+  cbSelectAll.onclick = () => {
+    const allSelected = selected.size === options.length;
+    cbList.querySelectorAll(".cb-item").forEach((item, i) => {
+      const val = options[i].value;
+      if (allSelected) {
+        selected.delete(val);
+        item.classList.remove("selected");
+        item.querySelector(".cb-box").textContent = "";
+      } else {
+        selected.add(val);
+        item.classList.add("selected");
+        item.querySelector(".cb-box").textContent = "✓";
+      }
+    });
+    updateConfirm();
+  };
+
+  cbConfirm.disabled = true;
+  cbConfirm.onclick = () => {
+    if (selected.size === 0) return;
+    const val = [...selected].join(",");
+    hideCheckboxes();
+    sendValue(val);
+  };
+
+  cbPanel.style.display = "flex";
+  updateConfirm();
+}
+
+function hideCheckboxes() {
+  cbPanel.style.display = "none";
+  cbList.innerHTML = "";
 }
 
 function scrollBottom() {

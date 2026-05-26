@@ -196,14 +196,22 @@ def _pick_files_interactive(files: list[str], metas: list) -> list[int]:
             print("  Invalid input — enter comma-separated numbers from the list.")
 
 
-def _load_signals_flow() -> tuple[dict, datetime]:
+def _load_signals_flow() -> tuple[dict, list]:
     """
-    Let the user pick saved signal JSON files and reconstruct all_results.
-    Returns (all_results, as_of_date) ready to pass straight into finalize().
+    Let the user pick saved signal JSON files.
+
+    Returns
+    -------
+    quarterly_data : {as_of_date_str: {stock_code: result_dict}}
+                     One entry per unique as-of date found in the selection.
+    sorted_dates   : list[str] — as_of_date strings in ascending order.
+
+    Single date selected  → standard load (one quarter, static portfolio).
+    Multiple dates selected → pre-computed quarterly backtest is offered.
     """
     files = _list_signal_files()
     if not files:
-        print(f"\n  No saved signal files found in '{REPORTS_DIR}/'.")
+        print(f"\n  No saved signal files found in '{REPORTS_DIR}/signals/'.")
         print("  Run a new analysis first to generate signal files.")
         sys.exit(1)
 
@@ -221,8 +229,8 @@ def _load_signals_flow() -> tuple[dict, datetime]:
         print("  No files selected. Exiting.")
         sys.exit(1)
 
-    all_results = {}
-    as_of_date  = None
+    # Group by as_of_date so multiple quarters are preserved
+    quarterly_data: dict[str, dict] = {}   # {date_str: {stock_code: result}}
 
     for idx in indices:
         if not (0 <= idx < len(files)):
@@ -232,32 +240,39 @@ def _load_signals_flow() -> tuple[dict, datetime]:
             print(f"  Could not read {files[idx]}. Skipping.")
             continue
 
+        date_str   = data["as_of_date"]
         stock_code = data["stock_code"]
-        if stock_code in all_results:
-            continue   # silently keep the first-selected date for each stock
 
-        file_date = datetime.strptime(data["as_of_date"], "%Y-%m-%d")
-        if as_of_date is None:
-            as_of_date = file_date
-        elif as_of_date != file_date:
-            print(f"  Warning: {stock_code} has a different as_of_date "
-                  f"({data['as_of_date']} vs {as_of_date.strftime('%Y-%m-%d')}). "
-                  f"Using the first date.")
+        if date_str not in quarterly_data:
+            quarterly_data[date_str] = {}
 
-        all_results[stock_code] = {
+        if stock_code in quarterly_data[date_str]:
+            continue   # same stock + same date already loaded
+
+        quarterly_data[date_str][stock_code] = {
             "company_name":   data["company_name"],
             "corp_info":      data["corp_info"],
             "debate_results": data["debate_results"],
             "report_files":   data["report_files"],
             "data":           {},
         }
-        print(f"  Loaded: {stock_code} — {data['company_name']}  (as_of {data['as_of_date']})")
+        print(f"  Loaded: {stock_code} — {data['company_name']}  (as_of {date_str})")
 
-    if not all_results:
+    if not quarterly_data:
         print("  No signals loaded. Exiting.")
         sys.exit(1)
 
-    return all_results, as_of_date
+    sorted_dates = sorted(quarterly_data.keys())
+
+    if len(sorted_dates) == 1:
+        n = len(quarterly_data[sorted_dates[0]])
+        print(f"\n  {n} stock(s) loaded  (as_of {sorted_dates[0]})")
+    else:
+        print(f"\n  {len(sorted_dates)} quarter(s) of signals loaded:")
+        for d in sorted_dates:
+            print(f"    {d}: {len(quarterly_data[d])} stock(s)")
+
+    return quarterly_data, sorted_dates
 
 
 # ── MD-to-JSON converter ─────────────────────────────────────────────────────
@@ -813,20 +828,21 @@ def main() -> None:
 
     # ── Load & Backtest shortcut ──────────────────────────────────────────────
     if choice == "B":
-        all_results, as_of_date = _load_signals_flow()
-        print(f"\n  {len(all_results)} stock(s) loaded.")
-        _run_backtest_menu(orchestrator, all_results, as_of_date)
+        quarterly_data, sorted_dates = _load_signals_flow()
+        _run_backtest_menu(orchestrator, quarterly_data, sorted_dates)
         return
 
     # ── Load signals ──────────────────────────────────────────────────────────
     if choice == "L":
-        all_results, as_of_date = _load_signals_flow()
-        print(f"\n  {len(all_results)} stock(s) loaded.")
+        quarterly_data, sorted_dates = _load_signals_flow()
 
     # ── New analysis ──────────────────────────────────────────────────────────
     else:
         all_results, as_of_date = _new_analysis_flow(orchestrator)
         print(f"\n  {len(all_results)} stock(s) analysed.")
+        # Wrap into quarterly_data format for unified backtest menu
+        quarterly_data = {as_of_date.strftime("%Y-%m-%d"): all_results}
+        sorted_dates   = [as_of_date.strftime("%Y-%m-%d")]
 
     # ── Save & Exit breakpoint ────────────────────────────────────────────────
     print("\n" + "─"*60)
@@ -844,25 +860,194 @@ def main() -> None:
         print("\n  Signals saved. Reload any time with [L] or [B].")
         return
 
-    _run_backtest_menu(orchestrator, all_results, as_of_date)
+    _run_backtest_menu(orchestrator, quarterly_data, sorted_dates)
 
 
-def _run_backtest_menu(orchestrator, all_results, as_of_date) -> None:
-    """Ask standard vs rebalancing backtest and run it."""
-    print("\n" + "─"*60)
+def _run_precomputed_rebalancing(quarterly_data: dict, sorted_dates: list) -> None:
+    """
+    Run a rebalancing backtest using pre-loaded quarterly signals.
+    No LLM calls — portfolio weights are computed directly from saved debate_results.
+
+    quarterly_data : {as_of_date_str: {stock_code: result_dict}}
+    sorted_dates   : ascending list of as_of_date strings
+    """
+    from portfolio.portfolio_agent import construct_portfolio
+    from backtest.runner import run_rebalanced_backtest
+    from report.summary_renderer import build_pdf
+    import anthropic as _ant
+    from config import ANTHROPIC_API_KEY, CLAUDE_MODEL
+
+    PROFILES = ("risk-averse", "risk-neutral")
+
+    print(f"\n{'='*60}")
+    print(f"  PRE-COMPUTED QUARTERLY BACKTEST")
+    print(f"  {len(sorted_dates)} quarter(s): {' → '.join(sorted_dates)}")
+    print(f"{'='*60}")
+
+    weight_schedule: dict[str, list] = {p: [] for p in PROFILES}
+    quarterly_log   = []
+    all_stock_codes: set  = set()
+    company_names:   dict = {}
+
+    # Build weight schedule from saved signals — one entry per quarter
+    for q_num, date_str in enumerate(sorted_dates, 1):
+        q_results = quarterly_data[date_str]
+        q_date    = datetime.strptime(date_str, "%Y-%m-%d")
+
+        stock_debate = {code: r["debate_results"] for code, r in q_results.items()}
+        portfolios   = construct_portfolio(stock_debate)
+
+        for code, r in q_results.items():
+            all_stock_codes.add(code)
+            company_names[code] = r["company_name"]
+
+        for profile in PROFILES:
+            weight_schedule[profile].append((q_date, dict(portfolios[profile]["weights"])))
+            po      = portfolios[profile]
+            n_held  = sum(1 for a in po["stock_allocations"].values() if a["weight"] > 0)
+            print(f"  Q{q_num} {date_str} [{profile.upper():<14}] {n_held} stock(s) selected")
+
+        quarterly_log.append({
+            "quarter":    q_num,
+            "start":      q_date,
+            "end":        None,   # filled below
+            "results":    q_results,
+            "portfolios": portfolios,
+        })
+
+    # Fill quarter end dates
+    for i in range(len(quarterly_log) - 1):
+        quarterly_log[i]["end"] = quarterly_log[i + 1]["start"]
+
+    # Ask backtest end date
+    last_q_date = datetime.strptime(sorted_dates[-1], "%Y-%m-%d")
     while True:
-        rebalance = input(
-            "  Would you like to rebalance quarterly? (Y/N): "
-        ).strip().upper()
-        if rebalance in ("Y", "N"):
+        end_date = _ask_date(
+            f"  Enter backtest end date (YYYY/MM/DD)"
+            f" [must be after {sorted_dates[-1]}]: "
+        )
+        if end_date > last_q_date:
+            quarterly_log[-1]["end"] = end_date
             break
-        print("  Please enter Y or N.")
-    print("─"*60)
+        print(f"  End date must be after {sorted_dates[-1]}. Try again.")
 
-    if rebalance == "Y":
-        _run_rebalancing(orchestrator, all_results, as_of_date)
+    start_date  = datetime.strptime(sorted_dates[0], "%Y-%m-%d")
+    stock_codes = sorted(all_stock_codes)
+
+    print(f"\n  Running backtest: "
+          f"{start_date.strftime('%Y-%m-%d')} → {end_date.strftime('%Y-%m-%d')}...")
+    backtest_results = run_rebalanced_backtest(
+        weight_schedules=weight_schedule,
+        start_date=start_date,
+        end_date=end_date,
+        all_stock_codes=stock_codes,
+    )
+
+    # LLM narrative (best-effort)
+    date_tag = start_date.strftime("%Y-%m-%d")
+    q_summary = "\n".join(
+        f"  Q{q['quarter']} ({q['start'].strftime('%Y-%m-%d')}): "
+        + ", ".join(
+            f"{code} → {q['portfolios']['risk-neutral']['stock_allocations'][code]['signal']}"
+            for code in stock_codes if code in q["portfolios"]["risk-neutral"]["stock_allocations"]
+        )
+        for q in quarterly_log
+    )
+    try:
+        _cl       = _ant.Anthropic(api_key=ANTHROPIC_API_KEY)
+        resp      = _cl.messages.create(
+            model=CLAUDE_MODEL, max_tokens=500,
+            messages=[{"role": "user", "content":
+                f"Write a 4–5 sentence executive summary for a rebalanced Korean equity portfolio.\n"
+                f"Stocks: {', '.join(f'{c} ({n})' for c, n in company_names.items())}\n"
+                f"Quarterly signal history:\n{q_summary}\n"
+                f"Cover: how signals evolved, which stocks were held vs rotated, "
+                f"recommended posture, one key risk."}]
+        )
+        narrative = resp.content[0].text.strip()
+    except Exception:
+        narrative = (f"Pre-computed quarterly portfolio across {len(quarterly_log)} quarter(s). "
+                     "LLM narrative unavailable.")
+
+    # Save PDF + JSON
+    run_date  = datetime.now().strftime("%Y-%m-%d")
+    rebal_dir = os.path.join(REPORTS_DIR, "backtest", run_date, date_tag, "rebalance")
+    os.makedirs(rebal_dir, exist_ok=True)
+    pdf_path  = os.path.join(rebal_dir, f"Exec_Sum_Rebalanced_{date_tag}.pdf")
+
+    build_pdf(
+        pdf_path=pdf_path,
+        company_names=company_names,
+        portfolios=quarterly_log[-1]["portfolios"],
+        narrative=narrative,
+        as_of_date=end_date,
+        backtest_results=backtest_results,
+        quarterly_log=quarterly_log,
+    )
+
+    _save_rebalancing_json(
+        start_date=start_date, end_date=end_date,
+        stock_codes=stock_codes, company_names=company_names,
+        weight_schedule=weight_schedule, quarterly_log=quarterly_log,
+        save_dir=rebal_dir,
+    )
+
+    print(f"\n{'='*60}")
+    print(f"  QUARTERLY BACKTEST COMPLETE")
+    print(f"  {len(quarterly_log)} quarter(s) — no LLM re-runs")
+    print(f"  PDF → {pdf_path}")
+    print(f"{'='*60}\n")
+
+
+def _run_backtest_menu(orchestrator, quarterly_data: dict, sorted_dates: list) -> None:
+    """
+    Choose and run a backtest mode.
+
+    quarterly_data : {as_of_date_str: {stock_code: result}}
+    sorted_dates   : ascending list of date strings
+    """
+    q1_date    = datetime.strptime(sorted_dates[0], "%Y-%m-%d")
+    q1_results = quarterly_data[sorted_dates[0]]
+
+    print("\n" + "─"*60)
+
+    if len(sorted_dates) > 1:
+        # Multiple quarters pre-loaded — offer dedicated mode
+        print(f"  {len(sorted_dates)} quarter(s) of signals loaded"
+              f" ({' / '.join(sorted_dates)})")
+        print()
+        print("  [P] Pre-computed quarterly backtest  — use all loaded quarters, no LLM")
+        print("  [S] Standard backtest                — Q1 signals only, static portfolio")
+        print("  [R] Quarterly rebalancing            — Q1 loaded, Q2+ re-run LLM")
+        while True:
+            choice = input("\n  Choice (P / S / R): ").strip().upper()
+            if choice in ("P", "S", "R"):
+                break
+            print("  Please enter P, S, or R.")
+        print("─"*60)
+
+        if choice == "P":
+            _run_precomputed_rebalancing(quarterly_data, sorted_dates)
+        elif choice == "S":
+            orchestrator.finalize(q1_results, q1_date)
+        else:
+            _run_rebalancing(orchestrator, q1_results, q1_date)
+
     else:
-        orchestrator.finalize(all_results, as_of_date)
+        # Single quarter — original two-option menu
+        while True:
+            rebalance = input(
+                "  Would you like to rebalance quarterly? (Y/N): "
+            ).strip().upper()
+            if rebalance in ("Y", "N"):
+                break
+            print("  Please enter Y or N.")
+        print("─"*60)
+
+        if rebalance == "Y":
+            _run_rebalancing(orchestrator, q1_results, q1_date)
+        else:
+            orchestrator.finalize(q1_results, q1_date)
 
 
 if __name__ == "__main__":

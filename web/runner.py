@@ -15,6 +15,8 @@ from datetime import datetime
 from tools.dart_tools import lookup_company
 from orchestrator.orchestrator_agent import OrchestratorAgent
 from portfolio.portfolio_agent import compute_conviction
+from calibration import load_or_generate_calibration
+from calibration.pipeline import get_existing_signal_dates
 
 REPORTS_DIR = "reports"
 
@@ -101,7 +103,7 @@ def _run(session):
 # ── New analysis ──────────────────────────────────────────────────────────────
 
 def _new_analysis_flow(session, orchestrator):
-    # Date
+    # ── Phase 1: Date ─────────────────────────────────────────────────────────
     while True:
         raw = session.ask(
             "Enter the analysis date",
@@ -113,10 +115,11 @@ def _new_analysis_flow(session, orchestrator):
         except ValueError:
             session.message("⚠ Invalid format — please use YYYY/MM/DD", msg_type="warning")
 
-    all_results = {}
+    # ── Phase 2: Collect stock pool ───────────────────────────────────────────
+    corp_infos: dict = {}   # stock_code → corp_info
 
     while True:
-        n = len(all_results) + 1
+        n = len(corp_infos) + 1
         raw = session.ask(
             f"Enter Stock #{n} ticker",
             subtext="6-digit KRX code  ·  e.g. 005930 (Samsung), 214150 (클래시스)  ·  Leave blank to finish",
@@ -124,16 +127,15 @@ def _new_analysis_flow(session, orchestrator):
         stock_code = raw.strip()
 
         if not stock_code:
-            if not all_results:
+            if not corp_infos:
                 session.message("⚠ Enter at least one ticker.", msg_type="warning")
                 continue
             break
 
-        if stock_code in all_results:
+        if stock_code in corp_infos:
             session.message(f"⚠ {stock_code} already in pool.", msg_type="warning")
             continue
 
-        # Lookup
         session.message(f"🔍 Looking up {stock_code} on OpenDART…", msg_type="loading")
         try:
             corp_info = lookup_company(stock_code)
@@ -147,22 +149,83 @@ def _new_analysis_flow(session, orchestrator):
             msg_type="success",
             subtext=f"DART confirmed  ·  corp_code: {corp_info.get('corp_code', '')}",
         )
+        corp_infos[stock_code] = corp_info
 
-        # Progress callback passed into the orchestrator
-        def make_cb(s):
-            def cb(event, *args):
-                if event == "fetch":
-                    s.progress(args[0])
-                elif event == "debate_start":
-                    s.debate_start(args[0], args[1])
-                elif event == "agent_update":
-                    agent, status, signal, rnd, prof = args
-                    s.agent_update(agent, status, signal, rnd, prof)
-            return cb
+        ans = session.ask(
+            f"{len(corp_infos)} stock(s) confirmed — add another?",
+            input_type="buttons",
+            options=[
+                {"label": "➕ Add Stock",       "value": "Y"},
+                {"label": "✓ Done — Proceed",   "value": "N"},
+            ],
+        )
+        if ans != "Y":
+            break
+
+    # ── Phase 3: Load or generate calibration context ─────────────────────────
+    stock_codes = list(corp_infos.keys())
+    calibration_context: dict = {}
+
+    prior_dates = get_existing_signal_dates(stock_codes, REPORTS_DIR)
+    as_of_str   = as_of_date.strftime("%Y-%m-%d")
+    prior_dates = [d for d in prior_dates if d < as_of_str]
+
+    if prior_dates:
+        all_dates = prior_dates + [as_of_str]
+        session.message(
+            f"📊 Loading calibration from {len(prior_dates)} prior quarter(s): "
+            f"{', '.join(prior_dates)}",
+            msg_type="loading",
+        )
+        try:
+            calibration_context = load_or_generate_calibration(
+                stock_codes=stock_codes,
+                signal_dates=all_dates,
+                reports_dir=REPORTS_DIR,
+            )
+            if calibration_context:
+                agents = list(calibration_context.keys())
+                session.message(
+                    f"✓ Calibration context ready for: {', '.join(agents)}",
+                    msg_type="success",
+                )
+            else:
+                session.message(
+                    "⚪ No calibration context produced (holding period may not be complete).",
+                    msg_type="info",
+                )
+        except Exception as e:
+            session.message(
+                f"⚠️ Calibration failed ({e}) — proceeding without it.",
+                msg_type="warning",
+            )
+            calibration_context = {}
+    else:
+        session.message(
+            "⚪ No prior signals found — running without calibration context.",
+            msg_type="info",
+        )
+
+    # ── Phase 4: Analyze each stock with calibration injected ─────────────────
+    def make_cb(s):
+        def cb(event, *args):
+            if event == "fetch":
+                s.progress(args[0])
+            elif event == "debate_start":
+                s.debate_start(args[0], args[1])
+            elif event == "agent_update":
+                agent, status, signal, rnd, prof = args
+                s.agent_update(agent, status, signal, rnd, prof)
+        return cb
+
+    all_results = {}
+    for stock_code, corp_info in corp_infos.items():
+        name = corp_info["corp_name"]
 
         result = orchestrator.analyze_stock(
             stock_code, as_of_date, corp_info,
             progress_cb=make_cb(session),
+            calibration_context=calibration_context,
         )
         all_results[stock_code] = result
 
@@ -179,25 +242,12 @@ def _new_analysis_flow(session, orchestrator):
                 "consensus":  dr["consensus_type"],
                 "rounds":     dr["consensus_round"],
             })
-        # Find the signals JSON saved by orchestrator (2 levels deep)
         date_tag = as_of_date.strftime("%Y-%m-%d")
         pattern  = os.path.join(REPORTS_DIR, "signals", f"{stock_code}_*", date_tag, f"{stock_code}_*{date_tag}.json")
         matches  = sorted(glob.glob(pattern))
         signal_file = matches[-1] if matches else ""
 
         session.stock_result(stock_code, name, card_results, signal_file=signal_file)
-
-        # Add more?
-        ans = session.ask(
-            f"{len(all_results)} stock(s) in pool — add another?",
-            input_type="buttons",
-            options=[
-                {"label": "➕ Add Stock",       "value": "Y"},
-                {"label": "✓ Done — Proceed",   "value": "N"},
-            ],
-        )
-        if ans != "Y":
-            break
 
     return all_results, as_of_date
 
@@ -461,6 +511,21 @@ def _precomputed_rebalancing_flow(session, quarterly_data: dict, sorted_dates: l
 
     start_date  = datetime.strptime(sorted_dates[0], "%Y-%m-%d")
     stock_codes = sorted(all_stock_codes)
+
+    # Guard: if every quarter was all-SELL, abort gracefully
+    any_invested = any(
+        v > 0
+        for sched in weight_schedule.values()
+        for _, w in sched
+        for v in w.values()
+    )
+    if not any_invested:
+        session.message(
+            "⚠️ All quarters produced SELL signals — no equity positions to backtest.",
+            msg_type="warning",
+        )
+        session.done()
+        return
 
     session.message(
         "📈 Running pre-computed quarterly backtest…",

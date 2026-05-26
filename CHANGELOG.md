@@ -5,6 +5,59 @@ Format: `[YYYY-MM-DD] — Summary`
 
 ---
 
+## [2026-05-26] — Performance Calibration Agent
+
+### New `reports/calibration/` subtree
+
+```
+reports/calibration/
+└── {signal_as_of_date}/
+    └── calibration.json
+```
+
+`calibration.json` schema:
+```json
+{
+  "signal_as_of_date":  "2025-06-01",
+  "holding_period_end": "2025-09-01",
+  "generated_at":       "2026-05-26",
+  "stocks_covered":     ["086900", "145020", "214150", "214450", "290650"],
+  "actual_returns":     {"086900": -31.09, ...},
+  "per_agent": {
+    "TechnicalAgent":   {"records": [...], "formatted_context": "..."},
+    "FundamentalAgent": {"records": [...], "formatted_context": "..."},
+    "SentimentAgent":   {"records": [...], "formatted_context": "..."},
+    "MarketAgent":      {"records": [...], "formatted_context": "..."},
+    "MacroAgent":       {"records": [...], "formatted_context": "..."}
+  }
+}
+```
+
+### How it works
+
+Each agent receives only its own domain's historical data — not a generic summary:
+- **TechnicalAgent** sees its own past RSI, MA20, signal, and actual outcome per stock per quarter
+- **FundamentalAgent** sees its own margin / earnings / debt calls and outcomes
+- **SentimentAgent** sees its own DART flag calls and outcomes
+- **MarketAgent** sees its own competitive positioning calls and outcomes
+- **MacroAgent** sees its own macro indicator calls and outcomes
+
+No LLM is used to generate the calibration — it is pure data engineering (parsing saved signal JSONs + fetching actual price returns). Each agent interprets its own track record through its own reasoning framework.
+
+### Load / generate rules
+
+| Condition | Behaviour |
+|---|---|
+| `calibration/{date}/calibration.json` exists AND `stocks_covered` matches current pool | Load directly — no regeneration, no API call |
+| File missing OR stock pool changed | Generate fresh → save → use |
+| First run (no prior signal history) | Skip calibration — agents run as normal |
+| Holding period end date is in the future | Skip that quarter — outcome not yet known |
+
+### Files changed
+`calibration/__init__.py` · `calibration/returns.py` · `calibration/extractor.py` · `calibration/builder.py` · `calibration/formatter.py` · `orchestrator/orchestrator_agent.py` · `main.py` · `web/runner.py` · `README.md`
+
+---
+
 ## [2026-05-26] — Company-first reports/ restructure + hierarchical file picker
 
 ### New `reports/` folder layout

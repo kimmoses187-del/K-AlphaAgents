@@ -67,7 +67,8 @@ class OrchestratorAgent:
 
     def analyze_stock(self, stock_code: str, as_of_date: datetime,
                       corp_info: dict, stage: str = "initial",
-                      progress_cb=None, output_dir: Optional[str] = None) -> dict:
+                      progress_cb=None, output_dir: Optional[str] = None,
+                      calibration_context: dict = None) -> dict:
         """
         Fetch data and run the 5-agent debate for one stock.
         Saves per-profile markdown reports.
@@ -89,7 +90,9 @@ class OrchestratorAgent:
 
         data           = self._fetch_data(stock_code, as_of_date, corp_info,
                                           stage=stage, progress_cb=progress_cb)
-        debate_results = self._run_debates(company_name, data, progress_cb=progress_cb)
+        debate_results = self._run_debates(company_name, data,
+                                           progress_cb=progress_cb,
+                                           calibration_context=calibration_context)
 
         # ── Output paths ──────────────────────────────────────────────────────
         # Structure: reports/signals/{ticker}_{name}/{as_of_date}/
@@ -362,7 +365,7 @@ class OrchestratorAgent:
         }
 
     def _run_debates(self, company_name: str, data: dict,
-                     progress_cb=None) -> dict:
+                     progress_cb=None, calibration_context: dict = None) -> dict:
         from debate.terminal_display import DebateGrid
 
         print("\n  [2/2] Running debates (both profiles in parallel)...")
@@ -384,6 +387,7 @@ class OrchestratorAgent:
                 macro_data=data["macro_data"],
                 progress_cb=progress_cb,
                 display=grid,
+                calibration_context=calibration_context,
             )
             return profile, result
 

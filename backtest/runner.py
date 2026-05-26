@@ -172,6 +172,12 @@ def run_rebalanced_backtest(
             print(f"  [WARNING] No weight schedule for {profile}, skipping.")
             continue
 
+        # Guard: skip if every quarter was all-SELL (no positive weights anywhere)
+        invested_tickers = {k for _, w in schedule for k, v in w.items() if v > 0}
+        if not invested_tickers:
+            print(f"  [WARNING] All quarters produced SELL signals for {profile} — no equity positions, skipping.")
+            continue
+
         ret  = engine.run_with_schedule(schedule)
         cum  = engine.metrics.cumulative_return(ret)
         roll = engine.metrics.rolling_sharpe(ret, _ROLLING_WINDOW)
@@ -209,12 +215,15 @@ def run_rebalanced_backtest(
         status = "fetched successfully" if series is not None else "unavailable"
         print(f"  [{label}] Benchmark {status}.")
 
-    return {
-        "risk-averse":    engines.get("risk-averse"),
-        "risk-neutral":   engines.get("risk-neutral"),
+    # Only include profiles that actually produced results (engine is not None)
+    result = {
         "summaries":      summaries,
         "kospi_cum":      kospi_cum,
         "kospi_rolling":  kospi_rolling,
         "kosdaq_cum":     kosdaq_cum,
         "kosdaq_rolling": kosdaq_rolling,
     }
+    for profile in ["risk-averse", "risk-neutral"]:
+        if profile in engines:
+            result[profile] = engines[profile]
+    return result

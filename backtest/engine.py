@@ -369,9 +369,12 @@ def plot_two_profiles(
     KOSDAQ       — ^KQ11 via yfinance (purple)
     """
     fig, axes = plt.subplots(2, 2, figsize=(16, 10), sharex="col")
+
+    # Use whichever engine is available for the title date range
+    _ref_engine = averse_engine if averse_engine is not None else neutral_engine
     fig.suptitle(
         f"Backtest Results — {company_name}\n"
-        f"{averse_engine.start}  →  {averse_engine.end}",
+        f"{_ref_engine.start}  →  {_ref_engine.end}",
         fontsize=14, fontweight="bold",
     )
 
@@ -388,6 +391,17 @@ def plot_two_profiles(
     KOSDAQ_COLOR    = "#8E44AD"
 
     for label, engine, (ax_top, ax_bot) in pairs:
+        # If this profile was skipped (all-SELL), show a placeholder panel
+        if engine is None:
+            for ax in (ax_top, ax_bot):
+                ax.set_facecolor("#FAFAFA")
+                ax.text(0.5, 0.5, f"{label}\n(All-SELL — no positions)",
+                        ha="center", va="center", transform=ax.transAxes,
+                        fontsize=11, color="#888888")
+                ax.set_xticks([])
+                ax.set_yticks([])
+            continue
+
         # Anchor x-axis to the engine's start date so the rolling-Sharpe
         # blank warm-up period is visible as empty space, not clipped.
         x_start = pd.Timestamp(engine.start)

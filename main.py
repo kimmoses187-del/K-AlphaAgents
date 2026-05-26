@@ -7,6 +7,8 @@ from datetime import datetime
 
 from tools.dart_tools import lookup_company
 from orchestrator.orchestrator_agent import OrchestratorAgent
+from calibration import load_or_generate_calibration
+from calibration.pipeline import get_existing_signal_dates
 
 REPORTS_DIR = "reports"
 
@@ -554,29 +556,30 @@ def _convert_md_to_signals_flow() -> None:
 # ── New-analysis flow ─────────────────────────────────────────────────────────
 
 def _new_analysis_flow(orchestrator: OrchestratorAgent) -> tuple[dict, datetime]:
-    """Full stock-pool loop: ask date, analyze stocks one by one."""
+    """Full stock-pool loop: ask date, confirm pool, then analyze with calibration."""
     as_of_date = _ask_date(
         "\n  Enter analysis date (YYYY/MM/DD)"
         " — all stocks will be analysed using data prior to this date: "
     )
 
-    all_results = {}
+    # ── Phase 1: collect stock pool ───────────────────────────────────────────
+    corp_infos: dict[str, dict] = {}   # stock_code → corp_info
 
     while True:
-        n = len(all_results) + 1
+        n = len(corp_infos) + 1
         print(f"\n{'─'*60}")
-        print(f"  Stock #{n}  ({len(all_results)} in pool so far)")
+        print(f"  Stock #{n}  ({len(corp_infos)} in pool so far)")
         print(f"{'─'*60}")
 
         stock_code = input("  Enter stock ticker (e.g. 005930): ").strip()
         if not stock_code:
-            if not all_results:
+            if not corp_infos:
                 print("  No stocks entered. Exiting.")
                 sys.exit(1)
             print("  Empty input — ending stock entry.")
             break
 
-        if stock_code in all_results:
+        if stock_code in corp_infos:
             print(f"  {stock_code} is already in the pool. Skipping.")
             continue
 
@@ -587,16 +590,54 @@ def _new_analysis_flow(orchestrator: OrchestratorAgent) -> tuple[dict, datetime]
             print(f"  Error: {e}. Skipping.")
             continue
         print(f"  Confirmed: {corp_info['corp_name']}  ({stock_code})")
-
-        result = orchestrator.analyze_stock(stock_code, as_of_date, corp_info)
-        all_results[stock_code] = result
+        corp_infos[stock_code] = corp_info
 
         more = input(
             f"\n  Add another stock to the pool? (Y/N)"
-            f"  [{len(all_results)} stock(s) analysed]: "
+            f"  [{len(corp_infos)} stock(s) confirmed]: "
         ).strip().upper()
         if more != "Y":
             break
+
+    # ── Phase 2: load or generate calibration context ─────────────────────────
+    stock_codes = list(corp_infos.keys())
+    calibration_context: dict = {}
+
+    prior_dates = get_existing_signal_dates(stock_codes, REPORTS_DIR)
+    as_of_str   = as_of_date.strftime("%Y-%m-%d")
+    # Only consider prior dates (before current as-of date)
+    prior_dates = [d for d in prior_dates if d < as_of_str]
+
+    if prior_dates:
+        # Include current as-of date as the holding-period end for the last prior quarter
+        all_dates = prior_dates + [as_of_str]
+        print(f"\n  📊 Loading calibration from {len(prior_dates)} prior quarter(s): "
+              f"{', '.join(prior_dates)}")
+        try:
+            calibration_context = load_or_generate_calibration(
+                stock_codes=stock_codes,
+                signal_dates=all_dates,
+                reports_dir=REPORTS_DIR,
+            )
+            if calibration_context:
+                agents_with_cal = list(calibration_context.keys())
+                print(f"  ✓ Calibration context ready for: {', '.join(agents_with_cal)}")
+            else:
+                print("  ⚪ No calibration context produced (holding period may not be complete).")
+        except Exception as e:
+            print(f"  ⚠️  Calibration generation failed ({e}) — proceeding without it.")
+            calibration_context = {}
+    else:
+        print("\n  ⚪ No prior signals found — running without calibration context (cold start).")
+
+    # ── Phase 3: run analysis with calibration injected ───────────────────────
+    all_results: dict = {}
+    for stock_code, corp_info in corp_infos.items():
+        result = orchestrator.analyze_stock(
+            stock_code, as_of_date, corp_info,
+            calibration_context=calibration_context,
+        )
+        all_results[stock_code] = result
 
     return all_results, as_of_date
 
@@ -934,6 +975,18 @@ def _run_precomputed_rebalancing(quarterly_data: dict, sorted_dates: list) -> No
     start_date  = datetime.strptime(sorted_dates[0], "%Y-%m-%d")
     stock_codes = sorted(all_stock_codes)
 
+    # Guard: check if any profile has at least one positive weight across all quarters
+    any_invested = any(
+        v > 0
+        for sched in weight_schedule.values()
+        for _, w in sched
+        for v in w.values()
+    )
+    if not any_invested:
+        print("\n  ⚠️  All quarters produced SELL signals for all stocks — "
+              "no equity positions to backtest. Aborting pre-computed rebalancing.")
+        return
+
     print(f"\n  Running backtest: "
           f"{start_date.strftime('%Y-%m-%d')} → {end_date.strftime('%Y-%m-%d')}...")
     backtest_results = run_rebalanced_backtest(
@@ -942,6 +995,14 @@ def _run_precomputed_rebalancing(quarterly_data: dict, sorted_dates: list) -> No
         end_date=end_date,
         all_stock_codes=stock_codes,
     )
+
+    # Check that at least one risk profile engine was produced
+    has_results = any(backtest_results.get(p) is not None
+                      for p in ("risk-averse", "risk-neutral"))
+    if not has_results:
+        print("\n  ⚠️  No backtest results produced (all profiles had all-SELL signals). "
+              "Nothing to save.")
+        return
 
     # LLM narrative (best-effort)
     date_tag = start_date.strftime("%Y-%m-%d")

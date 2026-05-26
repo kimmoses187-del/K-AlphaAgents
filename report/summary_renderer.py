@@ -230,9 +230,13 @@ def _make_pie(profile_label: str, company_names: dict,
 def _make_backtest_fig(backtest_results: dict) -> plt.Figure:
     """Build the 2×2 backtest chart from live BacktestEngine results."""
     from backtest.engine import plot_two_profiles
+    averse_engine  = backtest_results.get("risk-averse")
+    neutral_engine = backtest_results.get("risk-neutral")
+    if averse_engine is None and neutral_engine is None:
+        raise ValueError("No profile engines available to plot.")
     fig = plot_two_profiles(
-        averse_engine=backtest_results["risk-averse"],
-        neutral_engine=backtest_results["risk-neutral"],
+        averse_engine=averse_engine,
+        neutral_engine=neutral_engine,
         company_name="",       # title already on the PDF page
         save_path=None,
         kospi_cum=backtest_results.get("kospi_cum"),

@@ -179,7 +179,7 @@ Backtesting is skipped automatically if no stocks receive a BUY signal in either
 
 ## Output Files
 
-`reports/` is split into two clean subtrees — **signals** (all LLM outputs, always reloadable) and **backtest** (PDFs and result files):
+`reports/` is split into three clean subtrees — **signals** (all LLM outputs, always reloadable), **backtest** (PDFs and result files), and **calibration** (per-agent signal accuracy history):
 
 ```
 reports/
@@ -192,14 +192,18 @@ reports/
 │           │   └── {ticker}_{name}_{as-of}_neutral.md
 │           └── {ticker}_{name}_{as-of}.json   ← signals for both profiles
 │
-└── backtest/
-    └── {run_date}/                    ← date the backtest was executed
-        └── {as_of_date}/
-            ├── buy_and_hold/
-            │   └── Exec_Sum_{as-of}.pdf         ← Executive Summary PDF
-            └── rebalance/                        ← only present if rebalancing was run
-                ├── Rebalanced_{as-of}.json       ← full weight schedule + quarterly log
-                └── Exec_Sum_Rebalanced_{as-of}.pdf
+├── backtest/
+│   └── {run_date}/                    ← date the backtest was executed
+│       └── {as_of_date}/
+│           ├── buy_and_hold/
+│           │   └── Exec_Sum_{as-of}.pdf         ← Executive Summary PDF
+│           └── rebalance/                        ← only present if rebalancing was run
+│               ├── Rebalanced_{as-of}.json       ← full weight schedule + quarterly log
+│               └── Exec_Sum_Rebalanced_{as-of}.pdf
+│
+└── calibration/
+    └── {signal_as_of_date}/           ← the quarter whose signals are being calibrated
+        └── calibration.json           ← per-agent signal accuracy history (auto-loaded on next run)
 ```
 
 **Q1, Q2, Q3 signals all land in `signals/{ticker}/{as_of_date}/`** — there is no separate quarterly subfolder.  
@@ -213,8 +217,17 @@ Each quarterly as-of date (e.g. `2025-06-01`, `2025-09-01`, `2025-12-01`) gets i
 | `backtest/…/Exec_Sum_*.pdf` | 2-page institutional PDF (buy-and-hold backtest) |
 | `backtest/…/Exec_Sum_Rebalanced_*.pdf` | 2-page institutional PDF (rebalancing backtest) |
 | `backtest/…/Rebalanced_*.json` | Saved weight schedule + quarterly log for future reload |
+| `calibration/…/calibration.json` | Per-agent signal accuracy history — auto-loaded at the start of the next analysis |
 
 Signal JSON files are created automatically after every `[N] New Analysis` run — no manual conversion step is required.
+
+### Calibration Files
+
+`calibration/{signal_as_of_date}/calibration.json` is generated automatically the next time a new analysis is run after a holding period has ended. It records what each of the five agents predicted for the previous quarter, what actually happened, and pre-formats that history per agent for injection into the next debate.
+
+**Load rule:** at the start of every new analysis, the system checks for existing calibration files covering the same stock pool. If found, they are loaded directly (no regeneration, no extra API call). If missing or the stock pool has changed, they are generated fresh and saved for future runs.
+
+**Cold start:** on the very first run there is no calibration history — the system proceeds without it and behavior is identical to today. Calibration activates automatically from the second quarter onwards.
 
 ### Executive Summary PDF
 

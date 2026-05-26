@@ -50,21 +50,42 @@ class DebateManager:
             market_data: str,
             macro_data: str,
             progress_cb=None,
-            display=None) -> dict:
+            display=None,
+            calibration_context: dict = None) -> dict:
         """
         Run the full 5-agent collaboration + debate pipeline.
 
-        display     : DebateGrid instance for in-place terminal updates.
-                      When provided, all terminal output goes through the
-                      grid (no plain prints from this method).
-        progress_cb : optional callback for web UI
-                      ('agent_update', agent_name, status, signal, round_num)
+        display              : DebateGrid instance for in-place terminal updates.
+                               When provided, all terminal output goes through the
+                               grid (no plain prints from this method).
+        progress_cb          : optional callback for web UI
+                               ('agent_update', agent_name, status, signal, round_num)
+        calibration_context  : optional dict mapping agent_name → calibration text block.
+                               Each agent's block is prepended to its data so the agent
+                               can reference its own past signal accuracy.
 
         Returns a dict with:
           company_name, final_signal, consensus_type
           ("unanimous" | "majority"), consensus_round, debate_log
         """
         profile = self.risk_profile
+
+        # ── Inject calibration context into each agent's data block ───────────
+        # The calibration is prepended to the cached data so agents see their
+        # own past track record before forming this quarter's view.
+        def _with_cal(agent_name: str, data: str) -> str:
+            if not calibration_context:
+                return data
+            ctx = calibration_context.get(agent_name, "")
+            if not ctx:
+                return data
+            return ctx + "\n\n---\n\n" + data
+
+        fundamental_data = _with_cal("FundamentalAgent", fundamental_data)
+        sentiment_data   = _with_cal("SentimentAgent",   sentiment_data)
+        technical_data   = _with_cal("TechnicalAgent",   technical_data)
+        market_data      = _with_cal("MarketAgent",      market_data)
+        macro_data       = _with_cal("MacroAgent",       macro_data)
 
         def _cb(agent: str, status: str, signal: str = "", rnd: int = 0):
             if display:

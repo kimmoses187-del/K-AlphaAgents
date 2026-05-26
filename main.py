@@ -33,8 +33,10 @@ def _list_signal_files() -> list[str]:
 def _pick_files_interactive(files: list[str], metas: list) -> list[int]:
     """
     Two-level folder browser — company → date.
-      Level 0 — {ticker}_{name} folders  (ENTER to open, ESC cancel)
-      Level 1 — {as_of_date} entries     (SPACE toggle, A all, ENTER confirm, ← back)
+      Level 0 — company list  (ENTER open · D done · ESC cancel)
+      Level 1 — date list     (SPACE toggle · A all · ENTER back · ESC back)
+    ENTER at date level goes BACK to company list (not exit).
+    D at company level finalises all selections and exits.
     Returns list of selected 0-based file indices.
     Falls back to plain numbered input if curses is unavailable.
     """
@@ -67,27 +69,33 @@ def _pick_files_interactive(files: list[str], metas: list) -> list[int]:
         selected   = set()      # file indices chosen by user
         cursor     = 0
 
+        def _total_sel():
+            return len(selected)
+
         def _draw_company_level(h, w):
-            hdr = ("  📁 signals/   "
-                   "↑↓ navigate · ENTER open · ESC cancel")
+            n_total = _total_sel()
+            done_hint = f" · D confirm ({n_total} selected)" if n_total else ""
+            hdr = f"  📁 signals/   ↑↓ navigate · ENTER open · ESC cancel{done_hint}"
             stdscr.addstr(0, 0, hdr[:w-1], curses.A_BOLD)
             stdscr.addstr(1, 0, "  " + "─" * min(72, w-3))
             for i, tkr in enumerate(sorted_tickers):
                 row = i + 2
                 if row >= h - 2:
                     break
-                entries   = ticker_map[tkr]
-                n_dates   = len(entries)
-                n_sel     = sum(1 for e in entries if e[0] in selected)
-                sel_tag   = f"  [{n_sel} selected]" if n_sel else ""
-                # Show company name from first meta if available
-                m0 = entries[0][2]
-                display   = m0.get("company_name", tkr) if m0 else tkr
-                line      = f"  📁  {display}  ({n_dates} date{'s' if n_dates != 1 else ''}){sel_tag}"
-                attr      = (curses.color_pair(1) | curses.A_BOLD
-                             if i == cursor else curses.color_pair(3))
+                entries = ticker_map[tkr]
+                n_dates = len(entries)
+                n_sel   = sum(1 for e in entries if e[0] in selected)
+                sel_tag = f"  ✓ {n_sel}/{n_dates}" if n_sel else ""
+                m0      = entries[0][2]
+                display = m0.get("company_name", tkr) if m0 else tkr
+                line    = f"  📁  {display}  ({n_dates} date{'s' if n_dates != 1 else ''}){sel_tag}"
+                attr    = (curses.color_pair(1) | curses.A_BOLD
+                           if i == cursor else curses.color_pair(3))
                 stdscr.addstr(row, 0, line[:w-1], attr)
-            foot = "  ENTER to open · ESC to cancel"
+                if n_sel and i != cursor:
+                    # Green tick for companies that have selections
+                    stdscr.addstr(row, 2, "📁", curses.color_pair(2))
+            foot = "  ENTER open company · D confirm all · ESC cancel"
             stdscr.addstr(h - 1, 0, foot[:w-1], curses.A_DIM)
 
         def _draw_date_level(h, w):
@@ -95,14 +103,14 @@ def _pick_files_interactive(files: list[str], metas: list) -> list[int]:
             m0      = entries[0][2]
             company = m0.get("company_name", cur_ticker) if m0 else cur_ticker
             hdr     = (f"  📁 {company}   "
-                       "↑↓ navigate · SPACE select · A all · ENTER confirm · ← back")
+                       "SPACE select · A all · ENTER back · ESC back")
             stdscr.addstr(0, 0, hdr[:w-1], curses.A_BOLD)
             stdscr.addstr(1, 0, "  " + "─" * min(72, w-3))
             for i, (idx, aod, meta) in enumerate(entries):
                 row  = i + 2
                 if row >= h - 2:
                     break
-                mark = "☑" if idx in selected else "☐"
+                mark  = "☑" if idx in selected else "☐"
                 label = f"  {mark}  {aod}"
                 attr  = (curses.color_pair(1) | curses.A_BOLD
                          if i == cursor else curses.A_NORMAL)
@@ -110,7 +118,7 @@ def _pick_files_interactive(files: list[str], metas: list) -> list[int]:
                 if idx in selected and i != cursor:
                     stdscr.addstr(row, 2, "☑", curses.color_pair(2) | curses.A_BOLD)
             n_sel = sum(1 for e in entries if e[0] in selected)
-            foot  = f"  {n_sel} selected — ENTER confirm · ← back"
+            foot  = f"  {n_sel} selected here — ENTER / ← to go back to company list"
             stdscr.addstr(h - 1, 0, foot[:w-1], curses.A_DIM)
 
         while True:
@@ -134,9 +142,15 @@ def _pick_files_interactive(files: list[str], metas: list) -> list[int]:
                 cursor = (cursor + 1) % max(1, n)
 
             elif level == 0 and key in (10, 13, curses.KEY_ENTER, curses.KEY_RIGHT):
+                # ENTER at company level → open date list
                 cur_ticker = sorted_tickers[cursor]
                 level      = 1
                 cursor     = 0
+
+            elif level == 0 and key in (ord('d'), ord('D')):
+                # D at company level → done, return all selected
+                if selected:
+                    return sorted(selected)
 
             elif level == 0 and key == 27:
                 return []
@@ -153,11 +167,9 @@ def _pick_files_interactive(files: list[str], metas: list) -> list[int]:
                     else:
                         selected |= tkr_idxs
 
-                elif key in (10, 13, curses.KEY_ENTER):
-                    if selected:
-                        return sorted(selected)
-
-                elif key in (curses.KEY_LEFT, curses.KEY_BACKSPACE, 27):
+                elif key in (10, 13, curses.KEY_ENTER,
+                             curses.KEY_LEFT, curses.KEY_BACKSPACE, 27):
+                    # Any "back" key at date level → return to company list
                     level  = 0
                     cursor = sorted_tickers.index(cur_ticker)
 
@@ -222,8 +234,7 @@ def _load_signals_flow() -> tuple[dict, datetime]:
 
         stock_code = data["stock_code"]
         if stock_code in all_results:
-            print(f"  {stock_code} already loaded — skipping duplicate.")
-            continue
+            continue   # silently keep the first-selected date for each stock
 
         file_date = datetime.strptime(data["as_of_date"], "%Y-%m-%d")
         if as_of_date is None:

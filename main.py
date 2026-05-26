@@ -33,6 +33,99 @@ def _list_signal_files() -> list[str]:
     return sorted(glob.glob(os.path.join(REPORTS_DIR, "*", "*", "*", "*.json")))
 
 
+def _pick_files_interactive(files: list[str], metas: list) -> list[int]:
+    """
+    Arrow-key + Space cursor picker. Returns list of selected 0-based indices.
+    Falls back to numbered input if curses is unavailable.
+    """
+    import curses
+
+    def _curses_picker(stdscr):
+        curses.curs_set(0)
+        curses.start_color()
+        curses.use_default_colors()
+        curses.init_pair(1, curses.COLOR_BLACK,  curses.COLOR_YELLOW)  # cursor row
+        curses.init_pair(2, curses.COLOR_GREEN,  -1)                   # selected mark
+        curses.init_pair(3, curses.COLOR_YELLOW, -1)                   # ticker highlight
+
+        selected = set()
+        cursor   = 0
+        n        = len(files)
+
+        def _label(i):
+            m = metas[i]
+            if m:
+                return f"{m['stock_code']:<8} {m['company_name']:<22} {m['as_of_date']}"
+            return os.path.basename(files[i])
+
+        while True:
+            stdscr.erase()
+            h, w = stdscr.getmaxyx()
+
+            header = "  Select signal files   ↑↓ navigate · SPACE toggle · A all · ENTER confirm"
+            stdscr.addstr(0, 0, header[:w-1], curses.A_BOLD)
+            stdscr.addstr(1, 0, "  " + "─" * min(70, w-3))
+
+            for i in range(n):
+                row = i + 2
+                if row >= h - 2:
+                    break
+                mark  = "☑" if i in selected else "☐"
+                label = _label(i)
+                line  = f"  {mark}  {label}"[:w-1]
+                attr  = curses.color_pair(1) | curses.A_BOLD if i == cursor else curses.A_NORMAL
+                stdscr.addstr(row, 0, line, attr)
+                if i in selected and i != cursor:
+                    # Re-colour the checkmark green
+                    stdscr.addstr(row, 2, "☑", curses.color_pair(2) | curses.A_BOLD)
+
+            footer = f"  {len(selected)} selected — ENTER to confirm"
+            stdscr.addstr(h - 1, 0, footer[:w-1], curses.A_DIM)
+            stdscr.refresh()
+
+            key = stdscr.getch()
+            if key in (curses.KEY_UP, ord('k')):
+                cursor = (cursor - 1) % n
+            elif key in (curses.KEY_DOWN, ord('j')):
+                cursor = (cursor + 1) % n
+            elif key == ord(' '):
+                if cursor in selected:
+                    selected.discard(cursor)
+                else:
+                    selected.add(cursor)
+            elif key in (ord('a'), ord('A')):
+                if len(selected) == n:
+                    selected.clear()
+                else:
+                    selected = set(range(n))
+            elif key in (10, 13, curses.KEY_ENTER):   # Enter
+                if selected:
+                    return sorted(selected)
+            elif key == 27:                            # Esc — cancel
+                return []
+
+    try:
+        return curses.wrapper(_curses_picker)
+    except Exception:
+        # Fallback: plain numbered input
+        print(f"\n  Saved signal files ({len(files)} found):")
+        for i, m in enumerate(metas):
+            if m:
+                print(f"  [{i+1:>2}] {m['stock_code']}  {m['company_name']}  (as_of {m['as_of_date']})")
+            else:
+                print(f"  [{i+1:>2}] {os.path.basename(files[i])}")
+        print()
+        while True:
+            raw = input("  Enter file numbers to load (e.g. 1  or  1,3,4): ").strip()
+            try:
+                indices = [int(x.strip()) - 1 for x in raw.split(",") if x.strip()]
+                if indices:
+                    return indices
+            except ValueError:
+                pass
+            print("  Invalid input — enter comma-separated numbers from the list.")
+
+
 def _load_signals_flow() -> tuple[dict, datetime]:
     """
     Let the user pick saved signal JSON files and reconstruct all_results.
@@ -44,42 +137,29 @@ def _load_signals_flow() -> tuple[dict, datetime]:
         print("  Run a new analysis first to generate signal files.")
         sys.exit(1)
 
-    print(f"\n  Saved signal files ({len(files)} found):")
-    for i, path in enumerate(files):
-        # Quick-peek at the JSON header so we can show useful info
+    # Load metadata for all files upfront
+    metas = []
+    for path in files:
         try:
             with open(path, encoding="utf-8") as f:
-                meta = json.load(f)
-            label = (f"  [{i+1:>2}] {meta['stock_code']}  "
-                     f"{meta['company_name']}  "
-                     f"(as_of {meta['as_of_date']})")
+                metas.append(json.load(f))
         except Exception:
-            label = f"  [{i+1:>2}] {os.path.basename(path)}"
-        print(label)
+            metas.append(None)
 
-    print()
-    while True:
-        raw = input("  Enter file numbers to load (e.g. 1  or  1,3,4): ").strip()
-        try:
-            indices = [int(x.strip()) - 1 for x in raw.split(",") if x.strip()]
-            if not indices:
-                raise ValueError
-            break
-        except ValueError:
-            print("  Invalid input — enter comma-separated numbers from the list.")
+    indices = _pick_files_interactive(files, metas)
+    if not indices:
+        print("  No files selected. Exiting.")
+        sys.exit(1)
 
     all_results = {}
     as_of_date  = None
 
     for idx in indices:
         if not (0 <= idx < len(files)):
-            print(f"  Skipping out-of-range index {idx + 1}.")
             continue
-        try:
-            with open(files[idx], encoding="utf-8") as f:
-                data = json.load(f)
-        except Exception as e:
-            print(f"  Could not read {files[idx]}: {e}. Skipping.")
+        data = metas[idx]
+        if data is None:
+            print(f"  Could not read {files[idx]}. Skipping.")
             continue
 
         stock_code = data["stock_code"]
@@ -100,7 +180,7 @@ def _load_signals_flow() -> tuple[dict, datetime]:
             "corp_info":      data["corp_info"],
             "debate_results": data["debate_results"],
             "report_files":   data["report_files"],
-            "data":           {},   # not needed for finalize()
+            "data":           {},
         }
         print(f"  Loaded: {stock_code} — {data['company_name']}  (as_of {data['as_of_date']})")
 
@@ -651,25 +731,56 @@ def main() -> None:
     print("\n" + "="*60)
     print("  K-AlphaAgents — Korean Equity Analysis")
     print("="*60)
-    print("\n  [N] New analysis        — fetch data, run agents, save signals")
-    print("  [L] Load saved signals  — skip analysis, go straight to portfolio & backtest")
+    print("\n  [N] New analysis         — fetch data, run agents, save signals")
+    print("  [L] Load saved signals   — load signals, then choose save or backtest")
+    print("  [B] Load & run backtest  — load signals and go straight to backtest")
 
     while True:
-        choice = input("\n  Choice (N / L): ").strip().upper()
-        if choice in ("N", "L"):
+        choice = input("\n  Choice (N / L / B): ").strip().upper()
+        if choice in ("N", "L", "B"):
             break
-        print("  Please enter N or L.")
+        print("  Please enter N, L, or B.")
 
     orchestrator = OrchestratorAgent()
 
+    # ── Load & Backtest shortcut ──────────────────────────────────────────────
+    if choice == "B":
+        all_results, as_of_date = _load_signals_flow()
+        print(f"\n  {len(all_results)} stock(s) loaded.")
+        _run_backtest_menu(orchestrator, all_results, as_of_date)
+        return
+
+    # ── Load signals ──────────────────────────────────────────────────────────
     if choice == "L":
         all_results, as_of_date = _load_signals_flow()
         print(f"\n  {len(all_results)} stock(s) loaded.")
+
+    # ── New analysis ──────────────────────────────────────────────────────────
     else:
         all_results, as_of_date = _new_analysis_flow(orchestrator)
         print(f"\n  {len(all_results)} stock(s) analysed.")
 
-    # ── Ask how to proceed ────────────────────────────────────────────────
+    # ── Save & Exit breakpoint ────────────────────────────────────────────────
+    print("\n" + "─"*60)
+    print("  Signals saved to reports/.")
+    print("  [R] Run backtest now")
+    print("  [S] Save & exit  (reload later with L or B)")
+    while True:
+        nxt = input("\n  Choice (R / S): ").strip().upper()
+        if nxt in ("R", "S"):
+            break
+        print("  Please enter R or S.")
+    print("─"*60)
+
+    if nxt == "S":
+        print("\n  Signals saved. Reload any time with [L] or [B].")
+        return
+
+    _run_backtest_menu(orchestrator, all_results, as_of_date)
+
+
+def _run_backtest_menu(orchestrator, all_results, as_of_date) -> None:
+    """Ask standard vs rebalancing backtest and run it."""
     print("\n" + "─"*60)
     while True:
         rebalance = input(

@@ -52,10 +52,17 @@ def _pick_files_interactive(files: list[str], metas: list) -> list[int]:
         cursor   = 0
         n        = len(files)
 
+        def _run_date(path):
+            # path = reports/{run_date}/{as_of_date}/{ticker}/{file}.json
+            parts = path.replace("\\", "/").split("/")
+            return parts[1] if len(parts) >= 2 else "?"
+
         def _label(i):
             m = metas[i]
             if m:
-                return f"{m['stock_code']:<8} {m['company_name']:<22} {m['as_of_date']}"
+                run_dt = _run_date(files[i])
+                return (f"{m['stock_code']:<8} {m['company_name']:<22} "
+                        f"as_of:{m['as_of_date']}  run:{run_dt}")
             return os.path.basename(files[i])
 
         while True:
@@ -109,9 +116,11 @@ def _pick_files_interactive(files: list[str], metas: list) -> list[int]:
     except Exception:
         # Fallback: plain numbered input
         print(f"\n  Saved signal files ({len(files)} found):")
-        for i, m in enumerate(metas):
+        for i, (path, m) in enumerate(zip(files, metas)):
             if m:
-                print(f"  [{i+1:>2}] {m['stock_code']}  {m['company_name']}  (as_of {m['as_of_date']})")
+                run_dt = path.replace("\\", "/").split("/")[1] if "/" in path else "?"
+                print(f"  [{i+1:>2}] {m['stock_code']}  {m['company_name']}  "
+                      f"as_of:{m['as_of_date']}  run:{run_dt}")
             else:
                 print(f"  [{i+1:>2}] {os.path.basename(files[i])}")
         print()

@@ -212,7 +212,11 @@ def _load_signals_flow(session):
         try:
             with open(path, encoding="utf-8") as f:
                 meta = json.load(f)
-            label = f"{meta['stock_code']} · {meta['company_name']} · {meta['as_of_date']}"
+            # Extract run_date from path: reports/{run_date}/{as_of_date}/...
+            parts   = path.replace("\\", "/").split("/")
+            run_dt  = parts[1] if len(parts) >= 2 else "?"
+            label = (f"{meta['stock_code']} · {meta['company_name']} · "
+                     f"as_of:{meta['as_of_date']}  run:{run_dt}")
         except Exception:
             meta  = None
             label = os.path.basename(path)

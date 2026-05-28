@@ -21,10 +21,13 @@ DART induty_code — KSIC (Korean Standard Industry Classification)
   First 3 characters = sub-division used for sector mapping
 """
 
+import logging
 import yfinance as yf
 from pykrx import stock as krx
 from datetime import datetime, timedelta
 from typing import Optional
+
+log = logging.getLogger(__name__)
 
 
 # ── KSIC → Sector mapping ─────────────────────────────────────────────────────
@@ -174,28 +177,110 @@ def _strip_suffix(ticker: str) -> str:
     return ticker.split(".")[0]
 
 
+# ── Gap 4: Dynamic peer detection via pykrx sector classifications ────────────
+
+def _get_dynamic_peers(
+    stock_code: str,
+    sector: str,
+    induty_code: str,
+    exchange: str,
+    max_peers: int = 5,
+) -> list[str]:
+    """
+    Find peers dynamically using pykrx's market sector classifications.
+
+    Strategy (tried in order):
+    1. pykrx.get_market_sector_classifications() — KRX official sector table.
+       Match on the same KRX sector code as the target stock.
+    2. Fallback: KOREAN_SECTOR_PEERS hardcoded list for the resolved sector.
+
+    Returns a list of raw 6-digit stock codes (no .KS/.KQ suffix).
+    """
+    # ── Strategy 1: pykrx sector classifications ──────────────────────────
+    try:
+        market = "KOSPI" if exchange == "KOSPI" else "KOSDAQ"
+        df = krx.get_market_sector_classifications(datetime.today().strftime("%Y%m%d"), market)
+        # Columns: 종목코드, 종목명, 시가총액, 분류코드, 분류명 (varies by pykrx version)
+        if df is not None and not df.empty:
+            # Normalise column names
+            cols = {c.lower(): c for c in df.columns}
+            code_col    = cols.get("종목코드") or cols.get("ticker") or df.columns[0]
+            sec_col_key = next((c for c in df.columns if "분류" in c or "섹터" in c or "sector" in c.lower()), None)
+
+            if sec_col_key and code_col:
+                # Find this stock's sector label
+                row = df[df[code_col] == stock_code]
+                if not row.empty:
+                    own_sector_label = row.iloc[0][sec_col_key]
+                    # All tickers in the same sector, excluding the stock itself
+                    same_sector = df[
+                        (df[sec_col_key] == own_sector_label) &
+                        (df[code_col] != stock_code)
+                    ][code_col].tolist()
+
+                    # Prefer larger-cap companies as peers (if market cap col exists)
+                    cap_col = next((c for c in df.columns if "시가총액" in c or "cap" in c.lower()), None)
+                    if cap_col:
+                        same_sector_df = df[
+                            (df[sec_col_key] == own_sector_label) &
+                            (df[code_col] != stock_code)
+                        ].copy()
+                        same_sector_df[cap_col] = same_sector_df[cap_col].apply(
+                            lambda x: float(str(x).replace(",", "") or 0)
+                        )
+                        same_sector_df = same_sector_df.sort_values(cap_col, ascending=False)
+                        same_sector = same_sector_df[code_col].tolist()
+
+                    peers = [str(c).zfill(6) for c in same_sector[:max_peers]]
+                    if peers:
+                        log.debug("Dynamic peers (pykrx sector '%s'): %s", own_sector_label, peers)
+                        return peers
+    except Exception as exc:
+        log.debug("pykrx sector classification failed: %s", exc)
+
+    # ── Strategy 2: fall back to hardcoded sector list ────────────────────
+    fallback = [
+        _strip_suffix(t) for t in KOREAN_SECTOR_PEERS.get(sector, [])
+        if _strip_suffix(t) != stock_code
+    ]
+    log.debug("Peer fallback (hardcoded '%s'): %s", sector, fallback[:max_peers])
+    return fallback[:max_peers]
+
+
 def get_peer_comparison(
     stock_code: str,
     sector: str,
     as_of_date: datetime,
     months: int = 3,
+    induty_code: str = "",
+    exchange: str = "KOSPI",
 ) -> list:
     """
     Fetch peer returns via pykrx (reliable) and names/ratios via yfinance (optional).
 
-    Returns up to 3 peers from KOREAN_SECTOR_PEERS for the resolved sector.
+    Gap 4: Peers are now detected dynamically from KRX sector classifications
+    before falling back to the hardcoded KOREAN_SECTOR_PEERS list.
+
+    Parameters
+    ----------
+    stock_code   : 6-digit KRX code of the stock being analysed
+    sector       : resolved sector label (from ksic_to_sector)
+    as_of_date   : analysis date
+    months       : lookback window for return calculation
+    induty_code  : DART KSIC code (used to refine sector matching)
+    exchange     : "KOSPI" or "KOSDAQ"
     """
     start_str = (as_of_date - timedelta(days=30 * months)).strftime("%Y%m%d")
     end_str   = as_of_date.strftime("%Y%m%d")
 
-    candidates = [
-        t for t in KOREAN_SECTOR_PEERS.get(sector, [])
-        if _strip_suffix(t) != stock_code
-    ]
+    # Dynamic peer detection (Gap 4)
+    peer_codes = _get_dynamic_peers(stock_code, sector, induty_code, exchange, max_peers=5)
 
     peers = []
-    for ticker_full in candidates[:3]:
-        code = _strip_suffix(ticker_full)
+    for code in peer_codes[:3]:    # cap at 3 for MarketAgent context size
+        # Build ticker string for yfinance
+        suffix      = ".KS" if exchange == "KOSPI" else ".KQ"
+        ticker_full = f"{code}{suffix}"
         try:
             # ── pykrx: return (primary, reliable) ────────────────────────
             df  = krx.get_market_ohlcv_by_date(start_str, end_str, code)
@@ -205,14 +290,19 @@ def get_peer_comparison(
                     (float(df["종가"].iloc[-1]) / float(df["종가"].iloc[0]) - 1) * 100, 2
                 )
 
-            # ── yfinance: name + ratios (optional, graceful fallback) ─────
-            name   = code
+            # ── pykrx: name from ticker list (no yfinance round-trip needed) ──
+            name = code
+            try:
+                name = krx.get_market_ticker_name(code) or code
+            except Exception:
+                pass
+
+            # ── yfinance: valuation ratios (optional, graceful fallback) ──
             pe     = None
             pb     = None
             mktcap = None
             try:
                 info   = yf.Ticker(ticker_full).info
-                name   = info.get("shortName") or info.get("longName") or code
                 pe     = info.get("trailingPE")
                 pb     = info.get("priceToBook")
                 mktcap = info.get("marketCap")

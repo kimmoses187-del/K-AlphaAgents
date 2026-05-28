@@ -254,4 +254,28 @@ def build_or_load_calibration(
     except Exception as exc:
         log.warning("Failed to save calibration file %s: %s", cal_path, exc)
 
+    # ── Gap 6: generate accuracy charts alongside the JSON ────────────────────
+    # Build a lightweight wrapper with per_agent_summary for the visualizer
+    try:
+        from calibration.visualizer import generate_calibration_charts
+
+        class _CalibrationDataWrapper:
+            """Lightweight wrapper to satisfy the visualizer's type interface."""
+            def __init__(self, cd: dict):
+                self.stocks_covered = cd["stocks_covered"]
+                self.signal_date    = cd["signal_as_of_date"]
+                self._n_quarters    = 1
+                # per_agent_summary: {agent_name: summary_stats_dict}
+                self.per_agent_summary = {
+                    agent: v["summary_stats"]
+                    for agent, v in cd["per_agent"].items()
+                }
+
+        wrapper = _CalibrationDataWrapper(calibration_data)
+        chart_paths = generate_calibration_charts(wrapper, str(cal_path.parent))
+        if chart_paths:
+            log.info("Calibration charts saved: %s", ", ".join(chart_paths))
+    except Exception as exc:
+        log.warning("Calibration chart generation skipped: %s", exc)
+
     return calibration_data

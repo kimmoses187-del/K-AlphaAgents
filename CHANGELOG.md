@@ -5,6 +5,170 @@ Format: `[YYYY-MM-DD] — Summary`
 
 ---
 
+## [2026-05-28] — Data Enrichment & Output Enhancements
+
+Nine targeted improvements were shipped in one batch. Token cost impact is shown per item.
+
+---
+
+### Gap 1 — DART Full Filing Documents (`tools/dart_document_tools.py`)
+
+**What:** FundamentalAgent now receives the full narrative text of DART filings — MD&A, risk factors, business description, financial highlights, and outlook — in addition to the structured financial statement numbers it already had.
+
+**Why:** Quantitative ratios tell you *what* happened; narrative disclosures tell you *why* and *what management expects next*. Without the narrative, the agent was working with numbers stripped of context — unable to detect one-off charges, product-line pivots, regulatory risks, or management guidance.
+
+**How:**
+- New `tools/dart_document_tools.py` with `fetch_document_narrative(corp_code, reports_plan, max_tokens=8000) → str`
+- Calls DART `/api/list.json` to get filing reception numbers, then downloads each report as a ZIP (`/api/document.xml?rcpNo=...`)
+- Unzips in-memory, parses HTML with BeautifulSoup, strips boilerplate, extracts target sections by Korean keyword headers (사업의 내용, 위험요소, MD&A, 재무제표에 관한 사항, 향후 전망)
+- Caps at 28,000 characters (~8,000 tokens) across all reports combined; fails silently with `""` on any error
+- Called in `orchestrator/_fetch_data()` and injected into FundamentalAgent's context block
+
+**Potential impact:** +~4,000–8,000 input tokens per stock (~$0.012–$0.024 per stock) from the narrative text; cached from Round 1 onward so cost per debate round is negligible. Expected improvement in FundamentalAgent's ability to identify qualitative risks and forward-looking signals.
+
+---
+
+### Gap 2 — DCF + Peer Comps Valuation (`tools/valuation_tools.py`)
+
+**What:** FundamentalAgent now receives a structured valuation context including a 5-year DCF with Bear/Base/Bull scenarios and a peer P/E / P/B comparison table.
+
+**Why:** Without an intrinsic value anchor, the agent was forming price judgments with no reference point beyond trend direction. The DCF provides a quantitative floor/ceiling; the comps table shows relative market pricing vs sector peers.
+
+**How:**
+- New `tools/valuation_tools.py` with `build_valuation_context(fs_years, peers, ticker_str, company_name) → str`
+- `_build_dcf_summary()`: parses DART `fnlttSinglAcnt` response dicts for revenue, operating income, and FCF; computes 3-year revenue CAGR; projects 5 years at half-CAGR (clamped 0–30%); discounts at WACC 10%, terminal growth 2%; Bear ×0.80 / Bull ×1.25 sensitivity
+- `_build_comps_summary()`: builds peer P/E and P/B table from MarketAgent peer data already fetched by orchestrator — no extra API call
+- Confidence rating (HIGH / MEDIUM / LOW) based on margin stability and CAGR sign
+- Called in `orchestrator/_fetch_data()` and appended to FundamentalAgent's data blob
+
+**Potential impact:** +~400–800 input tokens per stock (valuation summary is compact). Reuses DART data already in memory — zero extra API calls. Expected improvement in conviction accuracy for fairly-valued vs overvalued stocks.
+
+---
+
+### Gap 4 — Dynamic Peer Detection (`tools/market_tools.py`)
+
+**What:** MarketAgent's peer list is now built dynamically from live pykrx sector classifications instead of a static hardcoded dictionary.
+
+**Why:** The hardcoded `KOREAN_SECTOR_PEERS` table only covered major sectors and had to be manually updated. New IPOs, sector reclassifications, and niche KOSDAQ companies were frequently missing or mismatched peers.
+
+**How:**
+- Added `_get_dynamic_peers(stock_code, sector, induty_code, exchange, max_peers=5) → list[str]` to `market_tools.py`
+- Strategy 1: calls `pykrx.get_market_sector_classifications(date, market)` → filters rows whose sector label contains the target sector string → sorts by market cap (descending) → returns top 5 codes excluding the target stock itself
+- Strategy 2: falls back to `KOREAN_SECTOR_PEERS` if the live call fails or returns no matches
+- Updated `get_peer_comparison()` signature to accept `induty_code` and `exchange` params; orchestrator now passes both
+- Peer names resolved via `krx.get_market_ticker_name()` (no yfinance round-trip needed)
+
+**Potential impact:** No token cost change (peer context is already part of MarketAgent's data blob). Qualitative improvement: peers are now current and market-cap ranked rather than arbitrary. Reduces risk of comparing a healthcare company to the wrong sector.
+
+---
+
+### Gap 5 — BoK ECOS Macro Data + Dynamic Risk-Free Rate (`tools/macro_tools.py` · `backtest/engine.py` · `config.py`)
+
+**What:** MacroAgent now includes four live BoK ECOS indicators (base rate, CPI YoY, industrial production index, 91-day CD rate). The 91-day CD rate feeds the Sharpe ratio calculation in BacktestEngine, replacing the previously hardcoded 3.5%.
+
+**Why:** The prior MacroAgent context was entirely yfinance-sourced (USD/KRW, global indices, commodities) — it had no direct data on Korean monetary policy, domestic inflation, or credit market rates. The hardcoded 3.5% Sharpe denominator was stale and not tied to actual market conditions.
+
+**How:**
+- Added `BOK_API_KEY = os.getenv("BOK_API_KEY")` to `config.py`
+- `_bok_fetch(stat_code, cycle, item_code, start_ym, end_ym)` in `macro_tools.py`: calls `ecos.bok.or.kr/api/StatisticSearch/{key}/json/kr/1/5/...` and returns the value list
+- `fetch_bok_indicators(as_of_date, months) → dict`: fetches all 4 series; extracts the last available data point per series
+- `get_risk_free_rate(as_of_date) → float`: fetches 91-day CD rate; falls back to 0.035 if `BOK_API_KEY` absent or API fails
+- `fetch_macro_indicators()`: merges yfinance + BoK results; tags each entry with its source
+- `format_macro_data_for_llm()`: adds a separate "BoK Monetary Policy & Domestic Macro" section when BoK data is available
+- `BacktestEngine.__init__()`: if `risk_free_rate=None`, calls `get_risk_free_rate(start_date)` at engine construction; falls back to 0.035
+
+**Potential impact:** +~200–400 input tokens per stock (BoK section in macro context). Requires `BOK_API_KEY` (free, instant from ecos.bok.or.kr). Sharpe ratios now reflect current Korean credit market rates rather than a fixed assumption.
+
+---
+
+### Gap 6 — Calibration Visualization (`calibration/visualizer.py` · `calibration/builder.py`)
+
+**What:** After each calibration build, two PNG charts are saved alongside `calibration.json`: a per-agent accuracy bar chart and a per-agent signal return chart.
+
+**Why:** `calibration.json` contains rich per-agent accuracy data but it is JSON — not human-readable at a glance. The charts let you immediately see which agents are performing above/below random baseline and whether BUY signals are actually generating positive returns.
+
+**How:**
+- New `calibration/visualizer.py` with `generate_calibration_charts(calibration_data, output_dir) → List[str]`
+- Chart 1 `agent_accuracy.png`: horizontal bar chart; bars colored green (≥65%), gold (50–65%), red (<50%); dashed reference lines at 50% (random baseline) and 65% (target threshold); dark theme matching brand colors
+- Chart 2 `signal_outcomes.png`: grouped bars — avg return on BUY (green) vs avg return on SELL (red) per agent; labeled with return values
+- `calibration/builder.py` wraps the calibration dict in a `_CalibrationDataWrapper` with a `per_agent_summary` attribute and calls `generate_calibration_charts()` after saving JSON; logs chart paths; continues gracefully if generation fails
+- Both PNGs are saved to the same directory as `calibration.json`
+
+**Potential impact:** No token cost change. Pure observability improvement — calibration data is now actionable without parsing JSON manually.
+
+---
+
+### Gap 7 — Excel + Word Export (`report/exporters.py`)
+
+**What:** After each analysis run, two additional output files are generated: a styled `.xlsx` portfolio summary and a `.docx` bundle of all per-stock reports.
+
+**Why:** PDF is the primary deliverable but is read-only. Analysts need the portfolio data in Excel to build their own models, and the full per-stock narrative in Word for annotation and editing. Without these formats, raw data was locked inside the PDF and individual MD files.
+
+**How:**
+- New `report/exporters.py` with two public functions:
+  - `export_portfolio_xlsx(portfolios, backtest_results, company_names, as_of_date, output_dir) → Optional[str]`: 3-sheet XLSX using openpyxl; Sheet 1 "Portfolio Summary" — signal, conviction, weight per stock per profile with BUY=green / SELL=red cell fill and navy/gold header row; Sheet 2 "Backtest Summary"; Sheet 3 "Signal Details"
+  - `export_reports_docx(report_md_paths, company_names, as_of_date, output_dir) → Optional[str]`: iterates all per-stock MD files; converts Markdown (headings, bullets, table rows) to Word paragraphs using python-docx; bundles into single file
+- Both called in `orchestrator/finalize()` after PDF generation; paths logged to console
+- Filenames: `portfolio_{YYYY-MM-DD}.xlsx`, `report_{YYYY-MM-DD}.docx`
+
+**Potential impact:** No token cost change (pure post-processing). Adds two new output files per run. Requires `openpyxl>=3.1.0` and `python-docx>=1.1.0` (both added to `requirements.txt`).
+
+---
+
+### Gap 8 — Naver Finance Analyst Consensus (`tools/naver_tools.py`)
+
+**What:** FundamentalAgent now receives the analyst consensus target price, analyst count, and implied upside/downside from Naver Finance.
+
+**Why:** Market consensus target prices represent the aggregated view of sell-side analysts with access to management guidance and proprietary models. Knowing whether the current price is 30% below or 10% above consensus is a material input for any fundamental call — but this data was absent from the system.
+
+**How:**
+- New `tools/naver_tools.py` with `fetch_analyst_consensus(stock_code) → str`
+- Scrapes `finance.naver.com/item/main.nhn?code={code}` with EUC-KR encoding set explicitly (`r.encoding = "euc-kr"`)
+- Extracts 목표주가 via regex `r"목표주가[^\d]*([0-9,]+)"` and analyst count; falls back to the consensus sub-page `/item/coinfo.nhn?code={code}&target=total`
+- Computes implied upside/downside from current price and maps to interpretation: >20% = bullish, 5–20% = cautiously constructive, −5% to +5% = neutral, <−5% = downside risk
+- Returns `""` on any failure (never raises); called in `orchestrator/_fetch_data()` and appended to FundamentalAgent's context
+
+**Potential impact:** +~100–200 input tokens per stock (consensus block is short). No API key required. Expected to improve FundamentalAgent's price anchoring — currently it forms valuation judgments without knowing where the market consensus sits.
+
+---
+
+### Gap 11 — PDF Brand Refresh + Calibration Chart Page (`report/summary_renderer.py`)
+
+**What:** The Executive Summary PDF now uses consistent brand colors throughout (navy `#0D1117`, gold `#F0B429`, BUY green `#2EA043`, SELL red `#F85149`). If calibration charts exist, a third page is appended showing agent accuracy and signal return charts side by side.
+
+**Why:** The previous PDF mixed multiple blues and greens that were not aligned with the system's visual identity. BUY/SELL badges used inconsistent colors across the file. The calibration charts, once generated (Gap 6), had no path into the PDF deliverable — they sat in the `calibration/` folder unused.
+
+**How:**
+- Updated brand constants in `summary_renderer.py`: `C_NAVY="#0D1117"`, `C_GOLD="#F0B429"`, `C_BLUE_MID="#2EA043"` (BUY), `C_RED_MID="#F85149"` (SELL)
+- `_badge_bg()` now returns `colors.HexColor("#2EA043")` for BUY and `colors.HexColor("#F85149")` for SELL
+- Section titles use gold `#F0B429` throughout
+- `build_pdf()` signature: added `calibration_charts_dir: Optional[str] = None`
+- If `agent_accuracy.png` or `signal_outcomes.png` exist in that directory, a third page is appended with the two charts placed side by side (half-width each) and a caption
+- `orchestrator/finalize()` passes the `calibration/` directory path to `build_pdf()` so charts are automatically included when available
+
+**Potential impact:** No token cost change. Visual improvement only. Calibration insight is now surfaced inside the primary PDF deliverable without requiring the user to separately open the PNG files.
+
+---
+
+### Dependencies added (`requirements.txt`)
+
+| Package | Version | Required by |
+|---|---|---|
+| `beautifulsoup4` | ≥4.12.0 | DART document parsing (Gap 1) |
+| `lxml` | ≥5.0.0 | BeautifulSoup HTML parser (Gap 1) |
+| `openpyxl` | ≥3.1.0 | Excel export (Gap 7) |
+| `python-docx` | ≥1.1.0 | Word export (Gap 7) |
+
+---
+
+### Files changed (summary)
+
+**New files:** `tools/dart_document_tools.py` · `tools/valuation_tools.py` · `tools/naver_tools.py` · `calibration/visualizer.py` · `report/exporters.py`
+
+**Modified files:** `tools/market_tools.py` · `tools/macro_tools.py` · `backtest/engine.py` · `calibration/builder.py` · `report/summary_renderer.py` · `orchestrator/orchestrator_agent.py` · `config.py` · `requirements.txt` · `.env` · `.env.example`
+
+---
+
 ## [2026-05-26] — Performance Calibration Agent
 
 ### New `reports/calibration/` subtree

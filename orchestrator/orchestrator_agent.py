@@ -10,6 +10,8 @@ import anthropic
 from config import ANTHROPIC_API_KEY, CLAUDE_MODEL
 from tools.dart_tools import fetch_and_format_reports
 from tools.dart_report_planner import plan_reports, build_coverage_note, describe_plan
+from tools.dart_document_tools import fetch_document_narrative          # Gap 1
+from tools.valuation_tools import build_valuation_context               # Gap 2
 from tools.yfinance_tools import get_yfinance_ticker
 from tools.sentiment_tools import fetch_sentiment_data
 from tools.pykrx_tools import (fetch_ohlcv, fetch_index_ohlcv,
@@ -18,10 +20,12 @@ from tools.metrics_tools import calculate_price_metrics, format_metrics_for_llm
 from tools.market_tools import (get_company_sector_info, get_peer_comparison,
                                 format_market_data_for_llm)
 from tools.macro_tools import fetch_macro_indicators, format_macro_data_for_llm
+from tools.naver_tools import fetch_analyst_consensus                    # Gap 8
 from debate.debate_manager import DebateManager
 from portfolio.portfolio_agent import construct_portfolio, compute_conviction
 from report.report_generator import generate_report
 from report.summary_renderer import build_pdf
+from report.exporters import export_portfolio_xlsx, export_reports_docx  # Gap 7
 from backtest.runner import run_backtest
 
 REPORTS_DIR = "reports"
@@ -255,6 +259,23 @@ class OrchestratorAgent:
         # ── Generate PDF ──────────────────────────────────────────────────
         print("\n  Generating executive summary PDF...")
         narrative = self._llm_narrative(company_names, portfolios, stock_debate_results)
+
+        # Gap 11: find the most recent calibration charts dir to embed in PDF
+        from calibration.pipeline import get_existing_signal_dates
+        import glob as _glob
+        _cal_charts_dir = None
+        try:
+            _existing_dates = get_existing_signal_dates(
+                list(all_results.keys()), REPORTS_DIR
+            )
+            if _existing_dates:
+                _latest_cal = _existing_dates[-1]
+                _candidate  = os.path.join(REPORTS_DIR, "calibration", _latest_cal)
+                if os.path.isfile(os.path.join(_candidate, "agent_accuracy.png")):
+                    _cal_charts_dir = _candidate
+        except Exception:
+            pass
+
         build_pdf(
             pdf_path=pdf_path,
             company_names=company_names,
@@ -262,6 +283,26 @@ class OrchestratorAgent:
             narrative=narrative,
             as_of_date=as_of_date,
             backtest_results=backtest_results,
+            calibration_charts_dir=_cal_charts_dir,
+        )
+
+        # ── Gap 7: Excel + Word export ────────────────────────────────────
+        report_md_paths = {
+            code: result["report_files"]
+            for code, result in all_results.items()
+        }
+        xlsx_path = export_portfolio_xlsx(
+            portfolios       = portfolios,
+            backtest_results = backtest_results,
+            company_names    = company_names,
+            as_of_date       = as_of_date,
+            output_dir       = bh_dir,
+        )
+        docx_path = export_reports_docx(
+            report_md_paths = report_md_paths,
+            company_names   = company_names,
+            as_of_date      = as_of_date,
+            output_dir      = bh_dir,
         )
 
         # ── Final console summary ─────────────────────────────────────────
@@ -271,7 +312,11 @@ class OrchestratorAgent:
         for code, result in all_results.items():
             for profile, path in result["report_files"].items():
                 print(f"  {path}")
-        print(f"  PDF → {pdf_path}")
+        print(f"  PDF  → {pdf_path}")
+        if xlsx_path:
+            print(f"  XLSX → {xlsx_path}")
+        if docx_path:
+            print(f"  DOCX → {docx_path}")
         print(f"{'='*60}\n")
         return pdf_path
 
@@ -293,6 +338,19 @@ class OrchestratorAgent:
         cov_note      = build_coverage_note(reports_plan, as_of_date)
         _log(f"    {describe_plan(reports_plan, as_of_date, stage)}")
         fundamental_data = fetch_and_format_reports(corp_info, reports_plan, cov_note)
+
+        # Gap 1: Append DART full-document narratives (MD&A, risk factors, etc.)
+        corp_code_for_docs = corp_info.get("corp_code", "")
+        if corp_code_for_docs:
+            _log("    dart-docs: fetching full document narratives...")
+            doc_narrative = fetch_document_narrative(
+                corp_code   = corp_code_for_docs,
+                reports_plan = reports_plan,
+                max_tokens  = 8_000,
+            )
+            if doc_narrative:
+                fundamental_data = fundamental_data + "\n\n" + doc_narrative
+                _log(f"    dart-docs: {len(doc_narrative)//4:,} tokens of narrative added")
 
         # ── pykrx: price history (current + previous quarter + benchmarks) ─
         _log("    pykrx: price history (current + prev quarter + KOSPI/KOSDAQ)...")
@@ -327,7 +385,7 @@ class OrchestratorAgent:
         )
 
         # ── Market: sector from DART + peer returns via pykrx ────────────────
-        _log("    sector / peers / macro...")
+        _log("    sector / peers / analyst consensus / macro...")
 
         # Compute benchmark returns from already-fetched pykrx history (no extra call)
         def _period_ret(hist):
@@ -341,14 +399,57 @@ class OrchestratorAgent:
 
         # Sector detection: DART corp_info (primary) + yfinance ratios (optional)
         sector_info = get_company_sector_info(corp_info, ticker_str)
-        peers       = get_peer_comparison(stock_code, sector_info.get("sector", ""), as_of_date)
+
+        # Gap 4: dynamic peers — pass induty_code + exchange for pykrx sector lookup
+        peers = get_peer_comparison(
+            stock_code   = stock_code,
+            sector       = sector_info.get("sector", ""),
+            as_of_date   = as_of_date,
+            induty_code  = sector_info.get("induty_code", ""),
+            exchange     = sector_info.get("exchange", "KOSPI"),
+        )
+
         market_data = format_market_data_for_llm(
             sector_info, kospi_return, kosdaq_return, peers, company_name
         )
 
+        # Gap 8: Naver Finance analyst consensus appended to market_data
+        analyst_block = fetch_analyst_consensus(stock_code)
+        if analyst_block:
+            market_data = market_data + "\n\n" + analyst_block
+
         macro_indicators = fetch_macro_indicators(as_of_date)
         macro_data       = format_macro_data_for_llm(macro_indicators,
                                                       sector_info.get("sector", "Unknown"))
+
+        # Gap 2: Valuation context (DCF + comps) appended to fundamental_data
+        # Re-use the already-fetched FS data from DART (no extra API calls)
+        try:
+            from tools.dart_tools import fetch_financial_statements
+            corp_code_v = corp_info.get("corp_code", "")
+            if corp_code_v:
+                # Fetch up to 3 annual report year data for DCF trend
+                _current_year  = as_of_date.year - (0 if as_of_date.month > 3 else 1)
+                _fs_years_raw  = []
+                for yr_offset in range(3):
+                    yr = _current_year - yr_offset
+                    fs = fetch_financial_statements(corp_code_v, yr, "11011")
+                    if fs.get("status") == "000" and fs.get("list"):
+                        _fs_years_raw.append(fs)
+                # Reverse to oldest → newest
+                _fs_years_raw.reverse()
+
+                if _fs_years_raw:
+                    val_block = build_valuation_context(
+                        fs_years     = _fs_years_raw,
+                        peers        = peers,
+                        ticker_str   = ticker_str,
+                        company_name = company_name,
+                    )
+                    if val_block:
+                        fundamental_data = fundamental_data + "\n\n" + val_block
+        except Exception as _ve:
+            _log(f"    [valuation] skipped: {_ve}")
 
         n_days = len(price_history) if not price_history.empty else 0
         print(f"    {stock_code} | {n_days} days | "

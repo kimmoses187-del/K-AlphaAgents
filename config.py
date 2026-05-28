@@ -6,6 +6,7 @@ load_dotenv()
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 OPENAI_API_KEY    = os.getenv("OPENAI_API_KEY")
 DART_API_KEY      = os.getenv("DART_API_KEY")
+BOK_API_KEY       = os.getenv("BOK_API_KEY")       # Bank of Korea ECOS API (optional)
 
 CLAUDE_MODEL      = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-6")
 OPENAI_MODEL      = "gpt-4o"

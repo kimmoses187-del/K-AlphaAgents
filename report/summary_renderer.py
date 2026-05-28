@@ -85,18 +85,20 @@ addMapping("KoreanSans", 1, 0, "KoreanSansBold")
 KO  = "KoreanSans"
 KOB = "KoreanSansBold"
 
-# ── Colour palette ────────────────────────────────────────────────────────────
-C_NAVY      = colors.HexColor("#0D1B2A")
-C_GOLD      = colors.HexColor("#C9A84C")
+# ── Colour palette (Gap 11: aligned with K-AlphaAgents brand) ─────────────────
+# Primary brand colors match the web UI exactly
+C_NAVY      = colors.HexColor("#0D1117")   # deep navy (updated from #0D1B2A)
+C_GOLD      = colors.HexColor("#F0B429")   # brand gold (updated from muted #C9A84C)
+C_PANEL     = colors.HexColor("#161B22")   # card panel background
 C_BLUE_DARK = colors.HexColor("#1A3A5C")
-C_BLUE_MID  = colors.HexColor("#2E6DA4")
-C_RED_MID   = colors.HexColor("#B03A2E")
-C_BLUE_LITE = colors.HexColor("#EBF5FB")
-C_GREEN_LITE= colors.HexColor("#EAFAF1")
-C_ORANGE_LT = colors.HexColor("#FDF2E9")
-C_GRAY_LITE = colors.HexColor("#F4F6F7")
-C_TEXT      = colors.HexColor("#1C2833")
-C_SUBTEXT   = colors.HexColor("#5D6D7E")
+C_BLUE_MID  = colors.HexColor("#2EA043")   # BUY green (was blue)
+C_RED_MID   = colors.HexColor("#F85149")   # SELL red (updated to brand red)
+C_BLUE_LITE = colors.HexColor("#0D2137")   # dark blue tint
+C_GREEN_LITE= colors.HexColor("#0D2110")   # dark green tint
+C_ORANGE_LT = colors.HexColor("#1A1500")   # unused, kept for compat
+C_GRAY_LITE = colors.HexColor("#F0F6FC")   # light table alt row
+C_TEXT      = colors.HexColor("#E6EDF3")   # near-white on dark
+C_SUBTEXT   = colors.HexColor("#8B949E")   # muted grey
 
 W, H   = A4
 MARGIN = 1.5 * cm
@@ -117,19 +119,23 @@ def _styles() -> dict:
     def ps(name, **kw):
         return ParagraphStyle(name, parent=base["Normal"], **kw)
 
+    # Gap 11: Updated styles to use dark-panel color scheme matching the brand
+    DARK_TEXT = colors.HexColor("#E6EDF3")   # near-white
+    DARK_SUB  = colors.HexColor("#8B949E")
+
     return {
-        "section":    ps("section",   fontSize=11, textColor=C_NAVY,
+        "section":    ps("section",   fontSize=11, textColor=colors.HexColor("#F0B429"),
                           fontName=KOB, spaceAfter=4),
-        "body":       ps("body",      fontSize=8.5, textColor=C_TEXT,
+        "body":       ps("body",      fontSize=8.5, textColor=colors.HexColor("#1C2833"),
                           fontName=KO, leading=13.5, spaceAfter=4,
                           alignment=TA_JUSTIFY),
-        "caption":    ps("caption",   fontSize=7.5, textColor=C_SUBTEXT,
+        "caption":    ps("caption",   fontSize=7.5, textColor=colors.HexColor("#5D6D7E"),
                           fontName=KO, leading=11, spaceAfter=2),
         "cell_hdr":   ps("cell_hdr",  fontSize=8, textColor=colors.white,
                           fontName=KOB, alignment=TA_CENTER),
-        "cell":       ps("cell",      fontSize=8, textColor=C_TEXT,
+        "cell":       ps("cell",      fontSize=8, textColor=colors.HexColor("#1C2833"),
                           fontName=KO, alignment=TA_CENTER, leading=11),
-        "cell_l":     ps("cell_l",    fontSize=8, textColor=C_TEXT,
+        "cell_l":     ps("cell_l",    fontSize=8, textColor=colors.HexColor("#1C2833"),
                           fontName=KO, alignment=TA_LEFT, leading=11),
         "buy":        ps("buy",       fontSize=8, textColor=colors.white,
                           fontName=KOB, alignment=TA_CENTER),
@@ -152,7 +158,7 @@ def _badge(signal: str, sty: dict) -> Paragraph:
 
 
 def _badge_bg(signal: str):
-    return C_BLUE_MID if signal == "BUY" else C_RED_MID
+    return colors.HexColor("#2EA043") if signal == "BUY" else colors.HexColor("#F85149")
 
 
 def _make_header_footer(as_of_str: str, run_str: str):
@@ -453,6 +459,7 @@ def build_pdf(
     as_of_date: datetime,
     backtest_results: Optional[dict] = None,
     quarterly_log: Optional[list] = None,
+    calibration_charts_dir: Optional[str] = None,   # Gap 11: dir with agent_accuracy.png
 ) -> str:
     """
     Build the executive summary PDF and save to pdf_path.
@@ -601,6 +608,45 @@ def build_pdf(
             "in either risk profile.",
             sty["body"],
         ))
+
+    # ── Gap 11: Calibration accuracy charts (optional extra page) ────────────
+    if calibration_charts_dir and os.path.isdir(calibration_charts_dir):
+        acc_png = os.path.join(calibration_charts_dir, "agent_accuracy.png")
+        out_png = os.path.join(calibration_charts_dir, "signal_outcomes.png")
+        has_charts = os.path.exists(acc_png) or os.path.exists(out_png)
+        if has_charts:
+            story.append(PageBreak())
+            cal_num = str(int(bt_num.rstrip(".")) + 1) + "."
+            story += _section_title(f"{cal_num}  Agent Calibration — Historical Accuracy", sty)
+            story.append(Paragraph(
+                "Each agent's directional accuracy is computed from prior signal quarters. "
+                "Green bars ≥ 65% indicate statistically useful track records; "
+                "orange bars ≥ 50% are above chance; red bars indicate below-random performance. "
+                "These charts are auto-generated from the calibration.json saved alongside signal files.",
+                sty["body"],
+            ))
+            story.append(Spacer(1, 0.3 * cm))
+            imgs = []
+            half_w = usable_w / 2 - 0.3 * cm
+            for png_path in (acc_png, out_png):
+                if os.path.exists(png_path):
+                    imgs.append(Image(png_path, width=half_w, height=half_w * 0.6))
+                else:
+                    imgs.append(Spacer(half_w, half_w * 0.6))
+            chart_tbl = Table([imgs], colWidths=[half_w + 0.3 * cm, half_w])
+            chart_tbl.setStyle(TableStyle([
+                ("VALIGN",       (0, 0), (-1, -1), "MIDDLE"),
+                ("LEFTPADDING",  (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+            ]))
+            story.append(chart_tbl)
+            story.append(Spacer(1, 0.2 * cm))
+            story.append(Paragraph(
+                "Left: % of signals where direction was correct (BUY→price up / SELL→price down).  "
+                "Right: average holding-period return on BUY signals (green) vs SELL signals (red). "
+                "Ideal: BUY return positive, SELL return negative.",
+                sty["caption"],
+            ))
 
     doc.build(story)
     print(f"  [PDF] Saved → {pdf_path}")

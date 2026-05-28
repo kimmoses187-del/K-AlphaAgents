@@ -74,11 +74,11 @@ python3 main.py
 
 | Agent | Data Source | Analytical Lens |
 |---|---|---|
-| **FundamentalAgent** | OpenDART — stage-aware: 3 annual FYs + all interim reports (initial) / 1 annual + 1 interim (rebalancing) | Revenue trends, margins, cash flow quality, debt, governance |
+| **FundamentalAgent** | OpenDART — stage-aware: 3 annual FYs + all interim reports (initial) / 1 annual + 1 interim (rebalancing) · **DART full filing documents** (MD&A, risk factors, business description) · **DCF + comps valuation** · **Naver analyst consensus** (target price, implied upside) | Revenue trends, margins, cash flow quality, debt, governance, intrinsic value vs market price |
 | **SentimentAgent** | DART disclosure list · pykrx investor net flow · pykrx short selling | Corporate events, foreign/institutional accumulation vs distribution, bearish positioning |
 | **TechnicalAgent** | pykrx price history — current quarter + prior quarter + KOSPI/KOSDAQ index | MA20/MA60, RSI, Bollinger Bands, relative performance vs benchmarks, QoQ delta |
-| **MarketAgent** | DART KSIC sector (primary) · pykrx peer returns · pykrx benchmark returns · yfinance ratios (optional) | Industry cycle, competitive positioning, KOSPI/KOSDAQ benchmark comparison |
-| **MacroAgent** | KRW/USD · KOSPI · KOSDAQ · S&P 500 · NASDAQ · US 10Y · Oil · Gold | Currency impact, interest rate environment, Korea vs global capital flows |
+| **MarketAgent** | DART KSIC sector (primary) · **pykrx dynamic peer detection** (live sector classifications) · pykrx benchmark returns · yfinance ratios (optional) | Industry cycle, competitive positioning, KOSPI/KOSDAQ benchmark comparison |
+| **MacroAgent** | KRW/USD · KOSPI · KOSDAQ · S&P 500 · NASDAQ · US 10Y · Oil · Gold · **BoK ECOS** (base rate, CPI, industrial production, CD rate) | Currency impact, interest rate environment, Korea vs global capital flows, domestic monetary policy |
 
 Each agent is independently role-prompted with the chosen risk profile and produces a standalone **BUY / SELL** recommendation before entering the debate phase.
 
@@ -177,6 +177,23 @@ Backtesting is skipped automatically if no stocks receive a BUY signal in either
 
 ---
 
+## Recent Enhancements (2026-05-28)
+
+Nine data-enrichment and output improvements were shipped in one batch. Summary of what was added:
+
+| # | Enhancement | Files |
+|---|---|---|
+| 1 | **DART full filing documents** — MD&A, risk factors, business narrative, outlook; ~8 K tokens per stock | `tools/dart_document_tools.py` |
+| 2 | **DCF + comps valuation** — 5-year DCF (WACC 10%, terminal 2%) with Bear/Base/Bull; peer P/E and P/B table; reuses already-fetched DART data | `tools/valuation_tools.py` |
+| 4 | **Dynamic peer detection** — live pykrx sector classifications replace the hardcoded peer list | `tools/market_tools.py` |
+| 5 | **BoK ECOS macro data + dynamic risk-free rate** — base rate, CPI, industrial production, 91-day CD rate; CD rate feeds Sharpe calculation in BacktestEngine | `tools/macro_tools.py` · `backtest/engine.py` · `config.py` |
+| 6 | **Calibration charts** — `agent_accuracy.png` (bar chart with baseline and target lines) + `signal_outcomes.png` (avg return on BUY vs SELL); dark-themed, saved alongside `calibration.json` | `calibration/visualizer.py` · `calibration/builder.py` |
+| 7 | **Excel + Word export** — `portfolio_{date}.xlsx` (3-sheet portfolio summary + backtest + signal detail) and `report_{date}.docx` (all MD reports bundled) | `report/exporters.py` |
+| 8 | **Naver Finance analyst consensus** — scrapes target price and analyst count; computes implied upside/downside; appended to FundamentalAgent context | `tools/naver_tools.py` |
+| 11 | **PDF brand refresh + calibration chart page** — brand colors updated to navy/gold/BUY-green/SELL-red; if calibration charts exist a third page is appended to the executive summary PDF | `report/summary_renderer.py` |
+
+---
+
 ## Output Files
 
 `reports/` is split into three clean subtrees — **signals** (all LLM outputs, always reloadable), **backtest** (PDFs and result files), and **calibration** (per-agent signal accuracy history):
@@ -203,7 +220,9 @@ reports/
 │
 └── calibration/
     └── {signal_as_of_date}/           ← the quarter whose signals are being calibrated
-        └── calibration.json           ← per-agent signal accuracy history (auto-loaded on next run)
+        ├── calibration.json           ← per-agent signal accuracy history (auto-loaded on next run)
+        ├── agent_accuracy.png         ← bar chart: per-agent accuracy vs 50% baseline / 65% target
+        └── signal_outcomes.png        ← avg return on BUY vs SELL per agent
 ```
 
 **Q1, Q2, Q3 signals all land in `signals/{ticker}/{as_of_date}/`** — there is no separate quarterly subfolder.  
@@ -214,10 +233,14 @@ Each quarterly as-of date (e.g. `2025-06-01`, `2025-09-01`, `2025-12-01`) gets i
 | `signals/…/*_neutral.md` | Full agent analyses + debate log — Risk-Neutral profile |
 | `signals/…/*_averse.md` | Full agent analyses + debate log — Risk-Averse profile |
 | `signals/…/*.json` | Structured signals for both profiles — auto-created after every run |
-| `backtest/…/Exec_Sum_*.pdf` | 2-page institutional PDF (buy-and-hold backtest) |
-| `backtest/…/Exec_Sum_Rebalanced_*.pdf` | 2-page institutional PDF (rebalancing backtest) |
+| `backtest/…/Exec_Sum_*.pdf` | 2–3 page institutional PDF (buy-and-hold backtest); page 3 = calibration charts if available |
+| `backtest/…/Exec_Sum_Rebalanced_*.pdf` | 2–3 page institutional PDF (rebalancing backtest) |
 | `backtest/…/Rebalanced_*.json` | Saved weight schedule + quarterly log for future reload |
+| `backtest/…/portfolio_{date}.xlsx` | 3-sheet Excel: Portfolio Summary · Backtest Summary · Signal Details |
+| `backtest/…/report_{date}.docx` | All per-stock MD reports bundled into a single Word document |
 | `calibration/…/calibration.json` | Per-agent signal accuracy history — auto-loaded at the start of the next analysis |
+| `calibration/…/agent_accuracy.png` | Bar chart: per-agent BUY/SELL accuracy vs 50% baseline and 65% target |
+| `calibration/…/signal_outcomes.png` | Grouped bar chart: avg return on BUY signals vs avg return on SELL signals |
 
 Signal JSON files are created automatically after every `[N] New Analysis` run — no manual conversion step is required.
 
@@ -231,12 +254,13 @@ Signal JSON files are created automatically after every `[N] New Analysis` run �
 
 ### Executive Summary PDF
 
-Built with **reportlab** — institutional navy/gold design, Korean font support.
+Built with **reportlab** — institutional navy (`#0D1117`) / gold (`#F0B429`) design, BUY badges in green (`#2EA043`), SELL badges in red (`#F85149`), Korean font support.
 
 | Page | Sections |
 |---|---|
 | Page 1 | §1 Stock Signals & Conviction table · §2 Portfolio Allocation cards + donut pie charts |
 | Page 2 | §3 Cross-Profile Narrative (Claude-written) · §4 Portfolio Metrics at a Glance · §5 Backtest Results chart |
+| Page 3 *(optional)* | Calibration Charts — agent accuracy bars + signal return outcomes; only appended if `calibration/` charts exist |
 
 ---
 
@@ -268,12 +292,15 @@ alpha_agents/
 │
 ├── tools/
 │   ├── dart_tools.py              # OpenDART: corp registry + financial statements
+│   ├── dart_document_tools.py     # DART full filing documents: MD&A, risk factors, outlook
 │   ├── dart_report_planner.py     # Stage-aware DART report planning (initial vs rebalancing)
 │   ├── pykrx_tools.py             # KRX price & index data via pykrx
 │   ├── sentiment_tools.py         # DART disclosures + pykrx investor flow + short selling
 │   ├── metrics_tools.py           # MA, RSI, Bollinger Bands, relative perf, QoQ delta
-│   ├── market_tools.py            # KSIC sector mapping, peer tickers, benchmark returns
-│   ├── macro_tools.py             # KRW/USD, US yields, global indices, commodities
+│   ├── market_tools.py            # KSIC sector mapping, dynamic peer detection, benchmark returns
+│   ├── macro_tools.py             # KRW/USD, US yields, global indices, commodities, BoK ECOS
+│   ├── valuation_tools.py         # DCF (5-yr, WACC 10%, terminal 2%) + peer P/E/P/B comps
+│   ├── naver_tools.py             # Naver Finance: analyst consensus target price + implied upside
 │   └── yfinance_tools.py          # Ticker lookup + optional ratio enrichment
 │
 ├── debate/
@@ -298,7 +325,8 @@ alpha_agents/
 │
 ├── report/
 │   ├── report_generator.py        # Per-stock Markdown report generator
-│   ├── summary_renderer.py        # Executive Summary PDF (reportlab)
+│   ├── summary_renderer.py        # Executive Summary PDF (reportlab) — brand colors + calibration page
+│   ├── exporters.py               # Excel (.xlsx) + Word (.docx) export
 │   └── summary_renderer_demo.py   # Standalone demo with mock data
 │
 └── reports/                       # Auto-created on first run
@@ -346,13 +374,17 @@ cp .env.example .env
 ANTHROPIC_API_KEY=your_anthropic_key
 OPENAI_API_KEY=your_openai_key
 DART_API_KEY=your_opendart_key
+BOK_API_KEY=your_bok_ecos_key      # optional — ecos.bok.or.kr/api (free, instant)
 ```
 
-| Key | Where to obtain |
-|---|---|
-| `ANTHROPIC_API_KEY` | [console.anthropic.com](https://console.anthropic.com) → API Keys |
-| `OPENAI_API_KEY` | [platform.openai.com](https://platform.openai.com) → API Keys |
-| `DART_API_KEY` | [opendart.fss.or.kr](https://opendart.fss.or.kr) → 인증키 신청/관리 |
+| Key | Where to obtain | Required |
+|---|---|---|
+| `ANTHROPIC_API_KEY` | [console.anthropic.com](https://console.anthropic.com) → API Keys | ✅ |
+| `OPENAI_API_KEY` | [platform.openai.com](https://platform.openai.com) → API Keys | ✅ |
+| `DART_API_KEY` | [opendart.fss.or.kr](https://opendart.fss.or.kr) → 인증키 신청/관리 | ✅ |
+| `BOK_API_KEY` | [ecos.bok.or.kr](https://ecos.bok.or.kr) → Open API → 인증키 신청 (free) | optional |
+
+`BOK_API_KEY` unlocks BoK ECOS macro indicators (base rate, CPI, industrial production, 91-day CD rate). Without it MacroAgent falls back to yfinance-only data and BacktestEngine uses a fixed 3.5% risk-free rate.
 
 ---
 
@@ -492,6 +524,7 @@ Set these in the Render dashboard (Settings → Environment):
 | `ANTHROPIC_API_KEY` | ✅ | Claude API key |
 | `OPENAI_API_KEY` | ✅ | OpenAI fallback key |
 | `DART_API_KEY` | ✅ | OpenDART API key |
+| `BOK_API_KEY` | optional | BoK ECOS API key — enables live Korean macro indicators |
 | `CLAUDE_MODEL` | optional | Override the default model (e.g. `claude-haiku-4-5`) |
 | `DEBUG_MODE` | optional | Set `true` to run without LLM calls (stub responses) |
 
@@ -509,15 +542,18 @@ Render dashboard → alpha-agents → Manual Deploy → Clear build cache & depl
 
 | Agent | Primary | Fallback |
 |---|---|---|
-| FundamentalAgent | OpenDART `/fnlttSinglAcnt.json` | — |
+| FundamentalAgent | OpenDART `/fnlttSinglAcnt.json` · DART full filing documents (ZIP→HTML→text) · Naver Finance analyst consensus | — |
 | SentimentAgent | DART `/list.json` · pykrx investor flow · pykrx short selling | — |
 | TechnicalAgent | pykrx `get_market_ohlcv_by_date()` | — |
-| MarketAgent | DART `corp_info` (KSIC sector) · pykrx peer returns | yfinance (P/E, P/B ratios) |
-| MacroAgent | yfinance (KRW/USD, indices, commodities) | — |
+| MarketAgent | DART `corp_info` (KSIC sector) · pykrx dynamic sector peers (`get_market_sector_classifications`) · pykrx peer returns | yfinance (P/E, P/B ratios) |
+| MacroAgent | yfinance (KRW/USD, indices, commodities) · BoK ECOS (base rate, CPI, industrial production, CD rate) | yfinance-only if `BOK_API_KEY` absent |
+| Valuation (fed to FundamentalAgent) | DART financial statements (reused, no extra call) → DCF + peer P/E/P/B | Confidence downgraded to LOW if data incomplete |
 
 ---
 
 ## Macro Indicators Tracked
+
+**yfinance (always available):**
 
 | Indicator | Ticker | Relevance |
 |---|---|---|
@@ -530,13 +566,26 @@ Render dashboard → alpha-agents → Manual Deploy → Clear build cache & depl
 | Gold | `GC=F` | Safe-haven demand |
 | Crude Oil (WTI) | `CL=F` | Input cost / geopolitical proxy |
 
+**BoK ECOS (requires `BOK_API_KEY` — free):**
+
+| Indicator | Series | Relevance |
+|---|---|---|
+| Base Rate | 722Y001 | Monetary policy stance; discount rate for DCF |
+| CPI (YoY) | 901Y009 | Inflation environment |
+| Industrial Production Index | 403Y003 | Domestic economic activity |
+| 91-day CD Rate | 817Y002 | Risk-free rate proxy for Sharpe calculation |
+
 ---
 
 ## Limitations
 
 - **KRX login warning:** pykrx prints a login warning on startup — this is cosmetic and does not affect data fetching. Public market data works without credentials.
 - **Financial data lag:** OpenDART financials reflect the most recently filed report based on Korea's actual filing calendar. For dates before key deadlines (Mar 31 / May 15 / Aug 14 / Nov 14), earlier reports are used.
-- **Peer mapping:** Sector peer tickers are predefined for major Korean sectors. Niche or cross-sector companies may lack ideal comparisons.
+- **Dynamic peer detection:** pykrx `get_market_sector_classifications()` uses KRX sector labels which may differ from DART KSIC codes. If the live lookup fails, the system falls back to the hardcoded `KOREAN_SECTOR_PEERS` table.
+- **DART full documents:** Annual and semi-annual reports are available as downloadable ZIPs. Not all filings contain every section (e.g., outlook or MD&A). Missing sections are skipped gracefully and the document context is left empty rather than raising an error.
+- **Naver Finance scraping:** Target prices are scraped from the public Naver Finance page and may be absent for thinly covered stocks. Scraping fails silently — FundamentalAgent proceeds without consensus data.
+- **DCF valuation:** The DCF model uses simplified assumptions (WACC 10%, terminal growth 2%, 5-year window). It is intended as a relative anchor, not a precise fair-value estimate.
+- **BoK ECOS lag:** BoK series are published with a 1–2 month lag. The most recent available data point is used; the series date is shown in the macro context.
 - **yfinance ratios:** P/E and P/B ratios from yfinance are optional enrichment — many Korean stocks return N/A. Core analysis does not depend on them.
 - **LLM outputs:** Despite the multi-agent debate mechanism (which demonstrably reduces hallucination — Du et al., 2023), all outputs should be treated as research assistance, not financial advice.
 

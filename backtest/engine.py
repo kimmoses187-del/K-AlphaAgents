@@ -192,12 +192,23 @@ class BacktestEngine:
         self,
         start_date: str,
         end_date: str,
-        risk_free_rate: float = 0.035,
+        risk_free_rate: float = None,   # Gap 5: None → auto-fetch from BoK
         rolling_window: int = 30,
         market: str = "KRX",
     ):
+        # Gap 5: resolve risk-free rate dynamically from BoK ECOS if not overridden
+        if risk_free_rate is None:
+            try:
+                from tools.macro_tools import get_risk_free_rate
+                from datetime import datetime
+                as_of = datetime.strptime(start_date, "%Y-%m-%d")
+                risk_free_rate = get_risk_free_rate(as_of)
+            except Exception:
+                risk_free_rate = 0.035  # fallback
+
         self.start          = start_date
         self.end            = end_date
+        self.risk_free_rate = risk_free_rate
         self.rolling_window = rolling_window
         self.fetcher        = get_fetcher(market)
         self.portfolio_builder = EqualWeightPortfolio()

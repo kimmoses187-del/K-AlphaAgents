@@ -202,7 +202,7 @@ def format_macro_data_for_llm(macro_data: dict, sector: str) -> str:
         for name, data in bok_items.items():
             unit   = data.get("unit", "")
             curr   = f"{data['current']:.2f}{unit}"
-            change = f"{data['change']:+.3f}{unit}"
+            change = f"{data.get('3m_return', 0):+.3f}{unit}"
             lines.append(f"{name:<28} {curr:>10} {change:>10}")
         lines += [
             "",

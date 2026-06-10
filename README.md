@@ -125,12 +125,12 @@ After Round 3 — Majority Vote
 
 ---
 
-## Conviction Scoring
+## Convergence Scoring
 
-Conviction is computed using a weighted vote combined with a round-speed bonus:
+Convergence is computed using a weighted vote combined with a round-speed bonus:
 
 ```
-conviction = (weighted_vote × 0.6) + (round_score × 0.4)
+convergence = (weighted_vote × 0.6) + (round_score × 0.4)
 
 weighted_vote : sum of agent weights for agents agreeing with the final signal
 round_score   : 1.0 at round 0 (instant consensus), decays to 0.0 at round 3
@@ -155,8 +155,8 @@ Each direct agent individually outweighs each indirect agent (0.2167 > 0.1750). 
 After all stocks are analysed, the **PortfolioAgent** constructs two separate portfolios — one per risk profile:
 
 - **SELL** stocks receive 0% weight and are excluded from the portfolio
-- **BUY** stocks are included regardless of conviction score
-- Weight is distributed **conviction-proportionally** across all BUY stocks, summing to 100%
+- **BUY** stocks are included regardless of convergence score
+- Weight is distributed **convergence-proportionally** across all BUY stocks, summing to 100%
 - Both profiles are signal-only — no fixed equity/bond split or stop-loss rules
 
 ---
@@ -258,7 +258,7 @@ Built with **reportlab** — institutional navy (`#0D1117`) / gold (`#F0B429`) d
 
 | Page | Sections |
 |---|---|
-| Page 1 | §1 Stock Signals & Conviction table · §2 Portfolio Allocation cards + donut pie charts |
+| Page 1 | §1 Stock Signals & Convergence table · §2 Portfolio Allocation cards + donut pie charts |
 | Page 2 | §3 Cross-Profile Narrative (Claude-written) · §4 Portfolio Metrics at a Glance · §5 Backtest Results chart |
 | Page 3 *(optional)* | Calibration Charts — agent accuracy bars + signal return outcomes; only appended if `calibration/` charts exist |
 
@@ -311,7 +311,7 @@ alpha_agents/
 │                                  #   → backtest → PDF
 │
 ├── portfolio/
-│   └── portfolio_agent.py         # Conviction scoring + signal-based allocation
+│   └── portfolio_agent.py         # Convergence scoring + signal-based allocation
 │
 ├── backtest/
 │   ├── engine.py                  # KRX data fetcher, metrics, BacktestEngine,
@@ -410,8 +410,8 @@ python3 main.py
   → Confirmed: 삼성전자(주)  (005930)
   → [1/2] Fetching data...
   → [2/2] Running debates (both profiles in parallel)...
-  → [RISK-AVERSE  ] BUY   conviction=0.920  (unanimous, 0 round(s))
-  → [RISK-NEUTRAL ] BUY   conviction=0.960  (unanimous, 0 round(s))
+  → [RISK-AVERSE  ] BUY   convergence=0.920  (unanimous, 0 round(s))
+  → [RISK-NEUTRAL ] BUY   convergence=0.960  (unanimous, 0 round(s))
 
   Add another stock to the pool? (Y/N): Y
   ...

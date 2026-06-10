@@ -353,7 +353,7 @@ def _build_metrics_table(company_names: dict, portfolios: dict,
     rows = [
         ["Metric",          "Risk-Averse",                        "Risk-Neutral"],
         ["Stocks Selected", f"{len(ra_in_equity)} of {n_total}",  f"{len(rn_in_equity)} of {n_total}"],
-        ["Avg Conviction",  avg_conv(ra_allocs, ra_in_equity),     avg_conv(rn_allocs, rn_in_equity)],
+        ["Avg Convergence", avg_conv(ra_allocs, ra_in_equity),     avg_conv(rn_allocs, rn_in_equity)],
     ]
     col_w = [usable_w * 0.40, usable_w * 0.30, usable_w * 0.30]
     tbl   = Table(rows, colWidths=col_w)
@@ -533,9 +533,9 @@ def build_pdf(
             story.append(Spacer(1, 0.35 * cm))
 
         story.append(Spacer(1, 0.2 * cm))
-        story += _section_title("2.  Final Quarter Signals & Conviction", sty)
+        story += _section_title("2.  Final Quarter Signals & Convergence", sty)
     else:
-        story += _section_title("1.  Stock Signals & Conviction", sty)
+        story += _section_title("1.  Stock Signals & Convergence", sty)
 
     story.append(_build_signal_table(company_names, portfolios, sty, usable_w))
     story.append(Spacer(1, 0.5 * cm))

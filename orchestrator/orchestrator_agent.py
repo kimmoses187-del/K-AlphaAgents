@@ -138,7 +138,7 @@ class OrchestratorAgent:
             dr         = debate_results[profile]
             conviction = compute_conviction(dr)
             print(f"  [{profile.upper():<14}] {dr['final_signal']:<4}  "
-                  f"conviction={conviction:.3f}  "
+                  f"convergence={conviction:.3f}  "
                   f"({dr['consensus_type']}, {dr['consensus_round']} round(s))")
         for profile, path in report_files.items():
             print(f"  Report [{profile}]: {path}")
@@ -203,7 +203,7 @@ class OrchestratorAgent:
                 status = f"weight={alloc['weight']*100:.1f}%" if alloc["weight"] > 0 \
                          else "excluded (SELL)"
                 print(f"    {code} ({name:<15}): {alloc['signal']:<4}  "
-                      f"conviction={alloc['conviction']:.3f}  {status}")
+                      f"convergence={alloc['conviction']:.3f}  {status}")
 
         # ── Skip backtest if no equity positions in either profile ───────
         any_equity = (
@@ -513,7 +513,7 @@ class OrchestratorAgent:
                 po  = portfolios[profile]["stock_allocations"][code]
                 stock_lines.append(
                     f"  {code} ({name}) [{profile}]: "
-                    f"{dr['final_signal']} | conviction={po['conviction']:.3f} | "
+                    f"{dr['final_signal']} | convergence={po['conviction']:.3f} | "
                     f"weight={po['weight']*100:.1f}% | "
                     f"{dr['consensus_type']} after {dr['consensus_round']} round(s)"
                 )
@@ -536,7 +536,7 @@ Risk-Neutral portfolio: {sum(1 for a in rn_po['stock_allocations'].values() if a
 
 Write a 4–5 sentence professional cross-profile synthesis in plain prose (no bullet points, no markdown).
 Cover: (1) which stocks have strong / weak signals and why, (2) where the two profiles agree or diverge,
-(3) the conviction-driven weight differences, (4) the recommended action for each investor type,
+(3) the convergence-driven weight differences, (4) the recommended action for each investor type,
 (5) one key risk to monitor across the pool.
 """
         try:

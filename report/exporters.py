@@ -105,7 +105,7 @@ def export_portfolio_xlsx(
     ws1.title = "Portfolio Summary"
     ws1.sheet_view.showGridLines = False
 
-    headers = ["Profile", "Stock Code", "Company", "Signal", "Conviction", "Weight (%)"]
+    headers = ["Profile", "Stock Code", "Company", "Signal", "Convergence", "Weight (%)"]
     for col, h in enumerate(headers, start=1):
         ws1.cell(row=1, column=col, value=h)
     _style_header_row(ws1, 1, GOLD, len(headers))

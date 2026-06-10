@@ -103,13 +103,13 @@ MOCK_PORTFOLIOS = {
 
 MOCK_NARRATIVE = (
     "Across the five-stock pool, the risk-averse and risk-neutral profiles reach strong "
-    "agreement on 클래시스 and 휴젤, both unanimously rated BUY with conviction scores "
+    "agreement on 클래시스 and 휴젤, both unanimously rated BUY with convergence scores "
     "above 0.78, and these two names anchor the equity sleeves in both portfolios. "
-    "파마리서치 clears the risk-neutral conviction threshold (0.59 ≥ 0.35) but falls "
+    "파마리서치 clears the risk-neutral convergence threshold (0.59 ≥ 0.35) but falls "
     "short of the more demanding risk-averse bar (0.64 < 0.60), producing a meaningful "
     "profile divergence in allocation. 메디톡스 and 엘앤씨바이오 are excluded from equity "
     "positions in the risk-averse sleeve entirely — the former due to a SELL signal driven "
-    "by structural earnings compression, the latter by below-threshold conviction. "
+    "by structural earnings compression, the latter by below-threshold convergence. "
     "Investors should monitor botulinum-toxin regulatory risk in Korea as the primary "
     "cross-pool tail risk, given that three of the five holdings operate in adjacent "
     "aesthetic-medicine segments."
@@ -361,7 +361,7 @@ def build_sample_pdf(out_path: str) -> str:
     # ═══════════════════════════════════════════════════════════
 
     # ── Section 1: Stock Signals ─────────────────────────────────────────────
-    story += _section_title("1.  Stock Signals & Conviction", sty)
+    story += _section_title("1.  Stock Signals & Convergence", sty)
 
     col_w = [1.8*cm, 3.2*cm,
              2.0*cm, 1.8*cm, 1.8*cm,
@@ -499,7 +499,7 @@ def build_sample_pdf(out_path: str) -> str:
     metrics = [
         ["Metric",              "Risk-Averse",  "Risk-Neutral"],
         ["Stocks in Equity",    "3 of 5",       "4 of 5"],
-        ["Avg Conviction",      "0.780",        "0.724"],
+        ["Avg Convergence",     "0.780",        "0.724"],
         ["Equity Allocation",   "60%",          "80%"],
         ["Bond Allocation",     "40%",          "20%"],
     ]

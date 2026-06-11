@@ -98,7 +98,8 @@ def export_portfolio_xlsx(
 
     wb = openpyxl.Workbook()
 
-    PROFILES = ("risk-averse", "risk-neutral")
+    # Profiles actually present in this run (single- or multi-profile)
+    PROFILES = list(portfolios.keys())
 
     # ── Sheet 1: Portfolio Summary ─────────────────────────────────────────
     ws1 = wb.active

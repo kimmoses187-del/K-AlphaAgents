@@ -5,6 +5,30 @@ Format: `[YYYY-MM-DD] — Summary`
 
 ---
 
+## [2026-06-11] — Selectable Risk Profiles
+
+**What:** The user now chooses which risk profile(s) to analyse at the start of a New Analysis — **Risk-Averse only**, **Risk-Neutral only**, or **Both** (default). A single-profile run produces one debate per stock, one portfolio, one backtest, and a single-column PDF / XLSX / DOCX. Previously every run always computed both profiles side by side.
+
+**Why:** Running both profiles doubles LLM cost and clutters the output when an investor only cares about one risk stance. Making the set selectable lets a user get a focused, single-portfolio analysis at half the debate cost.
+
+**How — design:** The selection is captured once at the entry point and then *derived from the data* everywhere downstream, rather than threaded as an argument through every layer. `analyze_stock(profiles=…)` runs only the chosen debates, so each stock's `debate_results` carries only the selected profiles; from there `portfolios.keys()` is the single source of truth for the portfolio, backtest, report, exports, and rebalancing stages. Saved single-profile signals therefore stay single-profile through every reload/backtest/rebalance path with no extra plumbing. See decision note `selectable-risk-profiles-derive-from-data`.
+
+**How — changes:**
+- `config.py` — new `ALL_PROFILES` constant + `profile_label` / `profile_tag` / `profile_short` helpers (single source of truth for profile metadata).
+- Entry points — `main.py` `_ask_profiles()` prompt and `web/runner.py` button picker; both pass `profiles` into `analyze_stock`.
+- `orchestrator/orchestrator_agent.py` — `analyze_stock` / `_run_debates` accept `profiles`; `finalize` and `_llm_narrative` derive the active set from `portfolios.keys()` (single-profile gets a solo narrative, not a cross-profile synthesis).
+- `portfolio/portfolio_agent.py` — `construct_portfolio` builds only the profiles present in its input.
+- `backtest/runner.py` + `backtest/engine.py` — backtest loops over present profiles; new 2×N `plot_profiles()` renders one or two columns; `plot_two_profiles()` retained as a thin wrapper.
+- `report/summary_renderer.py` — signal table, profile cards, metrics table, donut pies, and rebalance-history tables all rebuilt dynamically per profile.
+- `report/exporters.py`, `rebalance/rebalance_engine.py` — derive profiles from data.
+- UI — `templates/ui.html` builds debate-grid columns lazily; terminal `DebateGrid(profiles)` shows only selected columns.
+
+**Impact:** Single-profile runs roughly halve debate LLM cost. Default behaviour (Both) is unchanged. Verified via `DEBUG_MODE=true` runs (single + dual, through to backtest/PDF/XLSX/DOCX) and synthetic single/dual-profile render tests.
+
+**Known limitation:** The legacy CLI MD-pair converter (`_convert_md_to_signals_flow`) still assumes both profiles, but it is an orphan helper not wired into the N/L/B menu; all live load flows use the JSON signals and handle single-profile saves. No `risk-seeking` profile exists yet — the agents only carry averse/neutral prompts.
+
+---
+
 ## [2026-05-28] — Data Enrichment & Output Enhancements
 
 Nine targeted improvements were shipped in one batch. Token cost impact is shown per item.

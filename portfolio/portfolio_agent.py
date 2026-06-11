@@ -1,4 +1,4 @@
-from config import MAX_DEBATE_ROUNDS
+from config import MAX_DEBATE_ROUNDS, ALL_PROFILES
 
 # Conviction weighting by data connectedness to the firm.
 # Direct agents (company-specific data) share 65% total weight equally.
@@ -16,7 +16,7 @@ _raw = {
 _total = sum(_raw.values())
 AGENT_WEIGHTS = {k: v / _total for k, v in _raw.items()}
 
-PROFILES = ["risk-averse", "risk-neutral"]
+PROFILES = list(ALL_PROFILES)
 
 
 def compute_conviction(debate_result: dict) -> float:
@@ -46,14 +46,16 @@ def compute_conviction(debate_result: dict) -> float:
     return round(vote_score * 0.6 + round_score * 0.4, 3)
 
 
-def construct_portfolio(stock_debate_results: dict) -> dict:
+def construct_portfolio(stock_debate_results: dict, profiles=None) -> dict:
     """
-    Build conviction-weighted multi-stock portfolios for both risk profiles.
+    Build conviction-weighted multi-stock portfolios, one per risk profile.
 
     Parameters
     ----------
-    stock_debate_results : {stock_code: {"risk-averse": debate_result,
-                                         "risk-neutral": debate_result}}
+    stock_debate_results : {stock_code: {profile: debate_result, ...}}
+    profiles             : which profiles to build. Defaults to whichever
+                           profiles are present in stock_debate_results, so a
+                           single-profile analysis yields a single portfolio.
 
     Returns
     -------
@@ -80,9 +82,14 @@ def construct_portfolio(stock_debate_results: dict) -> dict:
     3. Distribute weight among BUY stocks proportional to conviction — summing to 1.0.
     4. If no stock qualifies → empty portfolio (position_taken = False).
     """
+    if profiles is None:
+        # Derive from the data: the profiles actually present in the first stock.
+        first = next(iter(stock_debate_results.values()), {})
+        profiles = list(first.keys()) or list(ALL_PROFILES)
+
     portfolios = {}
 
-    for profile in PROFILES:
+    for profile in profiles:
         # Step 1 & 2: conviction + signal per stock
         convictions = {}
         signals     = {}

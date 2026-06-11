@@ -162,7 +162,20 @@ def _new_analysis_flow(session, orchestrator):
         if ans != "Y":
             break
 
-    # ── Phase 3: Load or generate calibration context ─────────────────────────
+    # ── Phase 3: Risk-profile selection ───────────────────────────────────────
+    from config import ALL_PROFILES, profile_label
+    profile_opts = [
+        {"label": f"{profile_label(p)} only", "value": p} for p in ALL_PROFILES
+    ] + [{"label": "⚖️ Both profiles", "value": "__both__"}]
+    chosen = session.ask(
+        "Which risk profile(s) to analyse?",
+        subtext="One profile → one analysis, one portfolio  ·  Both → side-by-side",
+        input_type="buttons",
+        options=profile_opts,
+    )
+    profiles = tuple(ALL_PROFILES) if chosen == "__both__" else (chosen,)
+
+    # ── Phase 4: Load or generate calibration context ─────────────────────────
     stock_codes = list(corp_infos.keys())
     calibration_context: dict = {}
 
@@ -206,7 +219,7 @@ def _new_analysis_flow(session, orchestrator):
             msg_type="info",
         )
 
-    # ── Phase 4: Analyze each stock with calibration injected ─────────────────
+    # ── Phase 5: Analyze each stock with calibration injected ─────────────────
     def make_cb(s):
         def cb(event, *args):
             if event == "fetch":
@@ -226,13 +239,14 @@ def _new_analysis_flow(session, orchestrator):
             stock_code, as_of_date, corp_info,
             progress_cb=make_cb(session),
             calibration_context=calibration_context,
+            profiles=profiles,
         )
         all_results[stock_code] = result
 
         # Result card
         debate_results = result["debate_results"]
         card_results = []
-        for profile in ("risk-averse", "risk-neutral"):
+        for profile in debate_results.keys():
             dr = debate_results[profile]
             conviction = compute_conviction(dr)
             card_results.append({
@@ -447,15 +461,14 @@ def _precomputed_rebalancing_flow(session, quarterly_data: dict, sorted_dates: l
     from portfolio.portfolio_agent import construct_portfolio
     from backtest.runner import run_rebalanced_backtest
 
-    PROFILES = ("risk-averse", "risk-neutral")
-
     session.message(
         f"⚡ Pre-computed quarterly backtest — {len(sorted_dates)} quarter(s)",
         msg_type="loading",
         subtext=" · ".join(sorted_dates),
     )
 
-    weight_schedule: dict = {p: [] for p in PROFILES}
+    # Profiles are derived from the saved signals (single- or multi-profile).
+    weight_schedule: dict = {}
     quarterly_log   = []
     all_stock_codes: set  = set()
     company_names:   dict = {}
@@ -472,8 +485,9 @@ def _precomputed_rebalancing_flow(session, quarterly_data: dict, sorted_dates: l
                 all_stock_codes.add(code)
                 company_names[code] = r["company_name"]
 
-            for profile in PROFILES:
-                weight_schedule[profile].append((q_date, dict(portfolios[profile]["weights"])))
+            for profile in portfolios.keys():
+                weight_schedule.setdefault(profile, []).append(
+                    (q_date, dict(portfolios[profile]["weights"])))
 
             quarterly_log.append({
                 "quarter":    q_num,

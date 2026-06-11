@@ -82,7 +82,7 @@ def run_backtest(
         w          = 1.0 / len(all_stock_codes)
         ew_weights = {code: w for code in all_stock_codes}
 
-    for profile in ["risk-averse", "risk-neutral"]:
+    for profile in portfolios.keys():
         engine = BacktestEngine(
             start_date=start_str,
             end_date=end_str,
@@ -119,15 +119,15 @@ def run_backtest(
         else:
             print(f"  [{label}] Benchmark unavailable — will be omitted from chart.")
 
-    return {
-        "risk-averse":    engines["risk-averse"],
-        "risk-neutral":   engines["risk-neutral"],
+    result = {
         "summaries":      summaries,
         "kospi_cum":      kospi_cum,
         "kospi_rolling":  kospi_rolling,
         "kosdaq_cum":     kosdaq_cum,
         "kosdaq_rolling": kosdaq_rolling,
     }
+    result.update(engines)   # one entry per profile actually run
+    return result
 
 
 def run_rebalanced_backtest(
@@ -157,7 +157,7 @@ def run_rebalanced_backtest(
     engines   = {}
     summaries = {}
 
-    for profile in ["risk-averse", "risk-neutral"]:
+    for profile in weight_schedules.keys():
         engine = BacktestEngine(
             start_date=start_str,
             end_date=end_str,
@@ -223,7 +223,5 @@ def run_rebalanced_backtest(
         "kosdaq_cum":     kosdaq_cum,
         "kosdaq_rolling": kosdaq_rolling,
     }
-    for profile in ["risk-averse", "risk-neutral"]:
-        if profile in engines:
-            result[profile] = engines[profile]
+    result.update(engines)   # only profiles that produced results
     return result

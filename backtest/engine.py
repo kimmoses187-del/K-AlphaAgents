@@ -352,9 +352,8 @@ class BacktestEngine:
 
 # ── Two-Profile Plot ──────────────────────────────────────────────────────────
 
-def plot_two_profiles(
-    averse_engine: BacktestEngine,
-    neutral_engine: BacktestEngine,
+def plot_profiles(
+    profile_engines: list,
     company_name: str,
     save_path: Optional[str] = None,
     kospi_cum: Optional[pd.Series] = None,
@@ -363,35 +362,42 @@ def plot_two_profiles(
     kosdaq_rolling: Optional[pd.Series] = None,
 ) -> plt.Figure:
     """
-    Side-by-side 2×2 backtest figure with three benchmarks overlaid.
+    2×N backtest figure (one column per risk profile) with three benchmarks
+    overlaid. Renders as many columns as profiles supplied — one column for a
+    single-profile run, two for both.
+
+    Parameters
+    ----------
+    profile_engines : ordered list of (label, BacktestEngine | None) pairs.
+                      A None engine renders a placeholder column.
 
     Layout
     ------
-    Col 0 (left)  → Risk-Averse portfolio
-    Col 1 (right) → Risk-Neutral portfolio
     Row 0 (top)   → Cumulative Return
     Row 1 (bottom)→ Rolling Sharpe Ratio (30 trading days)
 
-    Benchmarks (same data overlaid on both columns)
+    Benchmarks (same data overlaid on every column)
     --------
     EW Benchmark — equal-weight of all analyzed stocks (added as a portfolio
                    inside the engine so KRX data is used consistently)
     KOSPI        — ^KS11 via yfinance (green)
     KOSDAQ       — ^KQ11 via yfinance (purple)
     """
-    fig, axes = plt.subplots(2, 2, figsize=(16, 10), sharex="col")
+    ncols = max(len(profile_engines), 1)
+    fig, axes = plt.subplots(2, ncols, figsize=(8 * ncols, 10),
+                             sharex="col", squeeze=False)
 
     # Use whichever engine is available for the title date range
-    _ref_engine = averse_engine if averse_engine is not None else neutral_engine
+    _ref_engine = next((e for _, e in profile_engines if e is not None), None)
+    date_range  = f"{_ref_engine.start}  →  {_ref_engine.end}" if _ref_engine else ""
     fig.suptitle(
-        f"Backtest Results — {company_name}\n"
-        f"{_ref_engine.start}  →  {_ref_engine.end}",
+        f"Backtest Results — {company_name}\n{date_range}",
         fontsize=14, fontweight="bold",
     )
 
     pairs = [
-        ("Risk-Averse",  averse_engine,  axes[:, 0]),
-        ("Risk-Neutral", neutral_engine, axes[:, 1]),
+        (label, engine, axes[:, i])
+        for i, (label, engine) in enumerate(profile_engines)
     ]
 
     # All lines are solid; distinguish by color only
@@ -481,3 +487,23 @@ def plot_two_profiles(
         print(f"[Saved] {save_path}")
 
     return fig
+
+
+def plot_two_profiles(
+    averse_engine: BacktestEngine,
+    neutral_engine: BacktestEngine,
+    company_name: str,
+    save_path: Optional[str] = None,
+    kospi_cum: Optional[pd.Series] = None,
+    kospi_rolling: Optional[pd.Series] = None,
+    kosdaq_cum: Optional[pd.Series] = None,
+    kosdaq_rolling: Optional[pd.Series] = None,
+) -> plt.Figure:
+    """Backward-compatible two-column wrapper around plot_profiles()."""
+    return plot_profiles(
+        [("Risk-Averse", averse_engine), ("Risk-Neutral", neutral_engine)],
+        company_name=company_name,
+        save_path=save_path,
+        kospi_cum=kospi_cum, kospi_rolling=kospi_rolling,
+        kosdaq_cum=kosdaq_cum, kosdaq_rolling=kosdaq_rolling,
+    )

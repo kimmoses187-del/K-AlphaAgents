@@ -18,6 +18,8 @@ import os
 from datetime import datetime
 from typing import Optional
 
+from config import profile_label, profile_short
+
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -235,16 +237,14 @@ def _make_pie(profile_label: str, company_names: dict,
     return fig
 
 
-def _make_backtest_fig(backtest_results: dict) -> plt.Figure:
-    """Build the 2×2 backtest chart from live BacktestEngine results."""
-    from backtest.engine import plot_two_profiles
-    averse_engine  = backtest_results.get("risk-averse")
-    neutral_engine = backtest_results.get("risk-neutral")
-    if averse_engine is None and neutral_engine is None:
+def _make_backtest_fig(backtest_results: dict, profiles: list) -> plt.Figure:
+    """Build the 2×N backtest chart from live BacktestEngine results."""
+    from backtest.engine import plot_profiles
+    profile_engines = [(profile_label(p), backtest_results.get(p)) for p in profiles]
+    if all(engine is None for _, engine in profile_engines):
         raise ValueError("No profile engines available to plot.")
-    fig = plot_two_profiles(
-        averse_engine=averse_engine,
-        neutral_engine=neutral_engine,
+    fig = plot_profiles(
+        profile_engines,
         company_name="",       # title already on the PDF page
         save_path=None,
         kospi_cum=backtest_results.get("kospi_cum"),
@@ -259,46 +259,45 @@ def _make_backtest_fig(backtest_results: dict) -> plt.Figure:
 
 def _build_signal_table(company_names: dict, portfolios: dict,
                         sty: dict, usable_w: float) -> Table:
-    col_w = [1.8*cm, 3.2*cm,
-             2.0*cm, 1.8*cm, 1.8*cm,
-             2.0*cm, 1.8*cm, 1.8*cm]
+    profiles    = list(portfolios.keys())
+    group_tints = [C_BLUE_LITE, C_GREEN_LITE]   # cycled per profile group
 
-    hdr = [Paragraph(t, sty["cell_hdr"]) for t in
-           ["Ticker", "Company",
-            "RA Signal", "RA Conv", "RA Wt",
-            "RN Signal", "RN Conv", "RN Wt"]]
-    data   = [hdr]
-    cmds   = [
+    col_w = [1.8*cm, 3.2*cm]
+    hdr   = [Paragraph(t, sty["cell_hdr"]) for t in ("Ticker", "Company")]
+    for p in profiles:
+        short = profile_short(p)
+        col_w += [2.0*cm, 1.8*cm, 1.8*cm]
+        hdr   += [Paragraph(f"{short} {t}", sty["cell_hdr"])
+                  for t in ("Signal", "Conv", "Wt")]
+
+    data = [hdr]
+    cmds = [
         ("BACKGROUND",    (0, 0), (-1, 0), C_BLUE_DARK),
         ("ROWBACKGROUNDS",(0, 1), (-1, -1), [colors.white, C_GRAY_LITE]),
-        ("BACKGROUND",    (2, 1), (4, -1), C_BLUE_LITE),
-        ("BACKGROUND",    (5, 1), (7, -1), C_GREEN_LITE),
         ("GRID",          (0, 0), (-1, -1), 0.4, colors.HexColor("#D5D8DC")),
         ("LINEABOVE",     (0, 0), (-1, 0), 1.5, C_BLUE_DARK),
         ("TOPPADDING",    (0, 0), (-1, -1), 5),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
         ("VALIGN",        (0, 0), (-1, -1), "MIDDLE"),
     ]
-
-    ra_po = portfolios["risk-averse"]
-    rn_po = portfolios["risk-neutral"]
+    # Tint each profile's 3-column group
+    for j in range(len(profiles)):
+        sig_col = 2 + j * 3
+        cmds.append(("BACKGROUND", (sig_col, 1), (sig_col + 2, -1),
+                     group_tints[j % len(group_tints)]))
 
     for i, (code, name) in enumerate(company_names.items(), start=1):
-        ra = ra_po["stock_allocations"][code]
-        rn = rn_po["stock_allocations"][code]
-        row = [
-            Paragraph(code, sty["cell"]),
-            Paragraph(name, sty["cell_l"]),
-            _badge(ra["signal"], sty),
-            Paragraph(f"{ra['conviction']:.3f}", sty["cell"]),
-            Paragraph(f"{ra['weight']*100:.1f}%" if ra["weight"] > 0 else "—", sty["cell"]),
-            _badge(rn["signal"], sty),
-            Paragraph(f"{rn['conviction']:.3f}", sty["cell"]),
-            Paragraph(f"{rn['weight']*100:.1f}%" if rn["weight"] > 0 else "—", sty["cell"]),
-        ]
+        row = [Paragraph(code, sty["cell"]), Paragraph(name, sty["cell_l"])]
+        for j, p in enumerate(profiles):
+            a       = portfolios[p]["stock_allocations"][code]
+            sig_col = 2 + j * 3
+            row += [
+                _badge(a["signal"], sty),
+                Paragraph(f"{a['conviction']:.3f}", sty["cell"]),
+                Paragraph(f"{a['weight']*100:.1f}%" if a["weight"] > 0 else "—", sty["cell"]),
+            ]
+            cmds.append(("BACKGROUND", (sig_col, i), (sig_col, i), _badge_bg(a["signal"])))
         data.append(row)
-        cmds.append(("BACKGROUND", (2, i), (2, i), _badge_bg(ra["signal"])))
-        cmds.append(("BACKGROUND", (5, i), (5, i), _badge_bg(rn["signal"])))
 
     tbl = Table(data, colWidths=col_w, repeatRows=1)
     tbl.setStyle(TableStyle(cmds))
@@ -306,17 +305,19 @@ def _build_signal_table(company_names: dict, portfolios: dict,
 
 
 def _build_profile_cards(portfolios: dict, sty: dict, usable_w: float) -> Table:
-    cards = []
-    for label, key in [("Risk-Averse", "risk-averse"), ("Risk-Neutral", "risk-neutral")]:
+    profiles = list(portfolios.keys())
+    card_w   = usable_w / len(profiles)
+    cards    = []
+    for key in profiles:
         po     = portfolios[key]
         n_buy  = sum(1 for a in po["stock_allocations"].values() if a["weight"] > 0)
         status = f"{n_buy} stock{'s' if n_buy != 1 else ''} selected" if n_buy else "No position taken"
         card_data = [
-            [Paragraph(label, ParagraphStyle("ch", fontName=KOB,
+            [Paragraph(profile_label(key), ParagraphStyle("ch", fontName=KOB,
                                               fontSize=9, textColor=colors.white))],
             [Paragraph(status, sty["cell"])],
         ]
-        card = Table(card_data, colWidths=[usable_w / 2 - 0.3 * cm])
+        card = Table(card_data, colWidths=[card_w - 0.3 * cm])
         card.setStyle(TableStyle([
             ("BACKGROUND",    (0, 0), (0, 0), C_BLUE_DARK),
             ("BACKGROUND",    (0, 1), (0, 1), C_GRAY_LITE),
@@ -328,7 +329,7 @@ def _build_profile_cards(portfolios: dict, sty: dict, usable_w: float) -> Table:
         cards.append(card)
 
     tbl = Table([cards],
-                colWidths=[usable_w / 2 - 0.15 * cm, usable_w / 2 - 0.15 * cm],
+                colWidths=[card_w - 0.15 * cm] * len(profiles),
                 hAlign="LEFT")
     tbl.setStyle(TableStyle([("LEFTPADDING",  (0, 0), (-1, -1), 0),
                               ("RIGHTPADDING", (0, 0), (-1, -1), 6)]))
@@ -337,42 +338,48 @@ def _build_profile_cards(portfolios: dict, sty: dict, usable_w: float) -> Table:
 
 def _build_metrics_table(company_names: dict, portfolios: dict,
                           sty: dict, usable_w: float) -> Table:
-    n_total = len(company_names)
-    ra_po   = portfolios["risk-averse"]
-    rn_po   = portfolios["risk-neutral"]
-
-    ra_allocs = ra_po["stock_allocations"]
-    rn_allocs = rn_po["stock_allocations"]
-
-    ra_in_equity = [c for c, a in ra_allocs.items() if a["weight"] > 0]
-    rn_in_equity = [c for c, a in rn_allocs.items() if a["weight"] > 0]
+    n_total  = len(company_names)
+    profiles = list(portfolios.keys())
 
     def avg_conv(allocs, codes):
         if not codes:
             return "—"
         return f"{sum(allocs[c]['conviction'] for c in codes) / len(codes):.3f}"
 
-    rows = [
-        ["Metric",          "Risk-Averse",                        "Risk-Neutral"],
-        ["Stocks Selected", f"{len(ra_in_equity)} of {n_total}",  f"{len(rn_in_equity)} of {n_total}"],
-        ["Avg Convergence", avg_conv(ra_allocs, ra_in_equity),     avg_conv(rn_allocs, rn_in_equity)],
-    ]
-    col_w = [usable_w * 0.40, usable_w * 0.30, usable_w * 0.30]
-    tbl   = Table(rows, colWidths=col_w)
-    tbl.setStyle(TableStyle([
+    header   = ["Metric"]
+    selected = ["Stocks Selected"]
+    avgconv  = ["Avg Convergence"]
+    for p in profiles:
+        allocs    = portfolios[p]["stock_allocations"]
+        in_equity = [c for c, a in allocs.items() if a["weight"] > 0]
+        header.append(profile_label(p))
+        selected.append(f"{len(in_equity)} of {n_total}")
+        avgconv.append(avg_conv(allocs, in_equity))
+    rows = [header, selected, avgconv]
+
+    metric_w = usable_w * 0.40
+    prof_w   = (usable_w - metric_w) / len(profiles)
+    col_w    = [metric_w] + [prof_w] * len(profiles)
+
+    group_tints = [C_BLUE_LITE, C_GREEN_LITE]
+    style_cmds  = [
         ("BACKGROUND",     (0, 0), (-1, 0), C_BLUE_DARK),
         ("TEXTCOLOR",      (0, 0), (-1, 0), colors.white),
         ("FONTNAME",       (0, 0), (-1, -1), KO),
         ("FONTNAME",       (0, 0), (-1,  0), KOB),
         ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, C_GRAY_LITE]),
-        ("BACKGROUND",     (1, 1), (1, -1), C_BLUE_LITE),
-        ("BACKGROUND",     (2, 1), (2, -1), C_GREEN_LITE),
         ("GRID",           (0, 0), (-1, -1), 0.4, colors.HexColor("#D5D8DC")),
         ("FONTSIZE",       (0, 0), (-1, -1), 8.5),
         ("TOPPADDING",     (0, 0), (-1, -1), 5),
         ("BOTTOMPADDING",  (0, 0), (-1, -1), 5),
         ("ALIGN",          (1, 0), (-1, -1), "CENTER"),
-    ]))
+    ]
+    for j in range(len(profiles)):
+        style_cmds.append(("BACKGROUND", (1 + j, 1), (1 + j, -1),
+                           group_tints[j % len(group_tints)]))
+
+    tbl = Table(rows, colWidths=col_w)
+    tbl.setStyle(TableStyle(style_cmds))
     return tbl
 
 
@@ -392,7 +399,6 @@ def _build_rebalance_history(
     Cols = Quarter date | Stock1 | Stock2 | … | Bond
     Cell = "BUY 18.3%" in blue, "SELL —" in red, or "— —" if not in pool
     """
-    profile_label = "Risk-Averse" if profile == "risk-averse" else "Risk-Neutral"
     codes  = list(company_names.keys())
     names  = [company_names[c] for c in codes]
 
@@ -484,6 +490,7 @@ def build_pdf(
     pdf_path
     """
     is_rebalanced = quarterly_log is not None and len(quarterly_log) > 1
+    profiles      = list(portfolios.keys())   # the profiles actually analysed
 
     sty       = _styles()
     usable_w  = W - 2 * MARGIN
@@ -525,9 +532,8 @@ def build_pdf(
         ))
         story.append(Spacer(1, 0.3 * cm))
 
-        for profile in ("risk-averse", "risk-neutral"):
-            label = "Risk-Averse" if profile == "risk-averse" else "Risk-Neutral"
-            story.append(Paragraph(f"<b>{label}</b>", sty["body"]))
+        for profile in profiles:
+            story.append(Paragraph(f"<b>{profile_label(profile)}</b>", sty["body"]))
             story.append(Spacer(1, 0.15 * cm))
             story.append(_build_rebalance_history(
                 company_names, quarterly_log, sty, usable_w, profile
@@ -547,15 +553,16 @@ def build_pdf(
     story.append(_build_profile_cards(portfolios, sty, usable_w))
     story.append(Spacer(1, 0.5 * cm))
 
-    # Donut pie charts
-    pw = usable_w / 2 - 0.4 * cm
+    # Donut pie charts — one per profile
+    pw = usable_w / len(profiles) - 0.4 * cm
     ph = pw * 0.9
-    pie_l = _make_pie("Risk-Averse",  company_names, portfolios, "risk-averse")
-    pie_r = _make_pie("Risk-Neutral", company_names, portfolios, "risk-neutral")
-    pie_tbl = Table(
-        [[_fig_to_rl_image(pie_l, pw, ph), _fig_to_rl_image(pie_r, pw, ph)]],
-        colWidths=[pw + 0.4 * cm, pw],
-    )
+    pie_imgs = [
+        _fig_to_rl_image(
+            _make_pie(profile_label(p), company_names, portfolios, p), pw, ph
+        )
+        for p in profiles
+    ]
+    pie_tbl = Table([pie_imgs], colWidths=[usable_w / len(profiles)] * len(profiles))
     pie_tbl.setStyle(TableStyle([
         ("VALIGN",       (0, 0), (-1, -1), "MIDDLE"),
         ("LEFTPADDING",  (0, 0), (-1, -1), 0),
@@ -572,7 +579,9 @@ def build_pdf(
     metrics_num = "5." if is_rebalanced else "4."
     bt_num      = "6." if is_rebalanced else "5."
 
-    story += _section_title(f"{narr_num}  Cross-Profile Investment Narrative", sty)
+    narr_title = ("Cross-Profile Investment Narrative" if len(profiles) > 1
+                  else "Investment Narrative")
+    story += _section_title(f"{narr_num}  {narr_title}", sty)
     story.append(Paragraph(narrative, sty["body"]))
     story.append(Spacer(1, 0.6 * cm))
 
@@ -581,15 +590,18 @@ def build_pdf(
     story.append(Spacer(1, 0.6 * cm))
 
     if backtest_results is not None:
-        bt_engine = backtest_results.get("risk-averse") or backtest_results.get("risk-neutral")
+        bt_engine = next((backtest_results.get(p) for p in profiles
+                          if backtest_results.get(p) is not None), None)
         bt_start  = bt_engine.start if bt_engine else as_of_str
         bt_end    = bt_engine.end   if bt_engine else "—"
         bt_label  = "Rebalanced Backtest" if is_rebalanced else "Backtest Results"
         story += _section_title(
             f"{bt_num}.  {bt_label}  ({bt_start} → {bt_end})", sty
         )
-        bt_fig = _make_backtest_fig(backtest_results)
-        story.append(_fig_to_rl_image(bt_fig, usable_w, usable_w * 0.52))
+        bt_fig = _make_backtest_fig(backtest_results, profiles)
+        # Single profile → narrower chart, keep aspect sane
+        bt_h   = usable_w * 0.52 if len(profiles) > 1 else usable_w * 0.62
+        story.append(_fig_to_rl_image(bt_fig, usable_w, bt_h))
         story.append(Spacer(1, 0.2 * cm))
         caption_extra = (
             "  Portfolio line shows time-varying weights across all quarterly rebalances."
@@ -605,9 +617,10 @@ def build_pdf(
         ))
     else:
         story += _section_title(f"{bt_num}.  Backtest", sty)
+        scope = "either risk profile" if len(profiles) > 1 else "the selected risk profile"
         story.append(Paragraph(
             "Backtesting was skipped — no stocks received a BUY recommendation "
-            "in either risk profile.",
+            f"in {scope}.",
             sty["body"],
         ))
 

@@ -2,8 +2,10 @@
 report/summary_renderer.py
 ==========================
 Produces the executive summary PDF from real analysis results.
-Design is identical to summary_renderer_demo.py; all mock data
-replaced with live inputs from the orchestrator.
+This file is the source of truth for the report design. It began as a port
+of summary_renderer_demo.py (a mock-data layout prototype), but the two have
+since diverged — the demo lags the current dark-theme brand palette and the
+KOSPI/KOSDAQ benchmarks. Treat this module as authoritative, not the demo.
 
 Public API
 ----------

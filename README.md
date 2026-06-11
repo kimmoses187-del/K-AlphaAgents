@@ -300,8 +300,7 @@ alpha_agents/
 │   ├── market_tools.py            # KSIC sector mapping, dynamic peer detection, benchmark returns
 │   ├── macro_tools.py             # KRW/USD, US yields, global indices, commodities, BoK ECOS
 │   ├── valuation_tools.py         # DCF (5-yr, WACC 10%, terminal 2%) + peer P/E/P/B comps
-│   ├── naver_tools.py             # Naver Finance: analyst consensus target price + implied upside
-│   └── yfinance_tools.py          # Ticker lookup + optional ratio enrichment
+│   └── naver_tools.py             # Naver Finance: analyst consensus target price + implied upside
 │
 ├── debate/
 │   └── debate_manager.py          # 5-agent round-robin debate + majority vote

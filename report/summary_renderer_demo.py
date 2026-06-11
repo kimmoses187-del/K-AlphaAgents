@@ -4,6 +4,12 @@ summary_renderer_demo.py
 Generates a sample executive summary PDF with dummy data so the layout
 can be reviewed and tweaked before wiring to real analysis results.
 
+NOTE: historical prototype — it has drifted behind the production renderer
+(report/summary_renderer.py), which is the source of truth. This demo still
+uses the older light palette (#0D1B2A / #C9A84C) and an S&P 500 benchmark;
+production uses the dark brand palette (#0D1117 / #F0B429) and KOSPI/KOSDAQ.
+Do not treat its styling as current.
+
 Run:
     python3 report/summary_renderer_demo.py
 Output:

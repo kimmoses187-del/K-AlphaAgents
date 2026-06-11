@@ -12,7 +12,6 @@ from tools.dart_tools import fetch_and_format_reports
 from tools.dart_report_planner import plan_reports, build_coverage_note, describe_plan
 from tools.dart_document_tools import fetch_document_narrative          # Gap 1
 from tools.valuation_tools import build_valuation_context               # Gap 2
-from tools.yfinance_tools import get_yfinance_ticker
 from tools.sentiment_tools import fetch_sentiment_data
 from tools.pykrx_tools import (fetch_ohlcv, fetch_index_ohlcv,
                                 KOSPI_INDEX, KOSDAQ_INDEX)
@@ -366,12 +365,11 @@ class OrchestratorAgent:
         )
         technical_data = format_metrics_for_llm(metrics, stock_code)
 
-        # ── yfinance: ticker string for display / ratio enrichment (optional) ─
-        ticker_str = f"{stock_code}.KS"   # display label fallback
-        try:
-            _, ticker_str = get_yfinance_ticker(stock_code)
-        except Exception:
-            pass
+        # ── yfinance ticker string for optional .info ratio enrichment ──────
+        # Market suffix (.KS/.KQ) comes from DART corp_cls ("Y"=KOSPI, "K"=KOSDAQ),
+        # already in hand — no per-analysis network probe needed.
+        _suffix = {"Y": ".KS", "K": ".KQ"}.get(corp_info.get("corp_cls", ""), ".KS")
+        ticker_str = f"{stock_code}{_suffix}"
 
         # ── Sentiment: DART disclosures + pykrx investor flow + short selling ─
         corp_code = corp_info.get("corp_code", "")

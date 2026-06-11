@@ -2,7 +2,7 @@
 ### LLM Multi-Agent System for Korean Equity Research
 
 A partial replication of **BlackRock's AlphaAgents** (Zhao et al., 2025) adapted for Korean equities (KOSPI/KOSDAQ).  
-**Five specialized AI agents** collaborate, debate, and reach a consensus **BUY / SELL** recommendation — simultaneously under both **Risk-Averse** and **Risk-Neutral** investor profiles — then automatically construct a portfolio and backtest it.
+**Five specialized AI agents** collaborate, debate, and reach a consensus **BUY / SELL** recommendation under your chosen investor profile — **Risk-Averse**, **Risk-Neutral**, or both at once — then automatically construct a portfolio and backtest it.
 
 ---
 
@@ -14,7 +14,8 @@ run
         ├── [N] New Analysis
         │       │
         │       ├── Enter as-of date  (YYYY/MM/DD)
-        │       └── Enter stock pool  (one or more tickers)
+        │       ├── Enter stock pool  (one or more tickers)
+        │       └── Pick risk profile(s)  (Averse / Neutral / Both)
         │               │
         │               ▼
         │   ┌───────────────────────────────────────────┐
@@ -22,8 +23,8 @@ run
         │   │                                           │
         │   │  For each stock:                          │
         │   │    1. Fetch data  (DART + pykrx)          │
-        │   │    2. Run 5-agent debate × 2 profiles     │
-        │   │       (parallel)                          │
+        │   │    2. Run 5-agent debate × selected       │
+        │   │       profile(s)  (parallel)             │
         │   │    3. Save  .md reports + .json signals   │
         │   │       → reports/signals/{ticker}_{name}/  │
         │   │                                           │
@@ -101,7 +102,7 @@ The agent applies the lens of its assigned profile when forming its final recomm
 
 This two-step approach ensures agents always consider the full picture before applying their profile weighting — avoiding the trap of selectively reading only bearish (or only bullish) signals.
 
-Both profiles run **simultaneously** via `ThreadPoolExecutor` — data is fetched once and shared.
+**Profiles are selectable per run.** At the start of a New Analysis you choose **Risk-Averse only**, **Risk-Neutral only**, or **Both** (default). A single-profile run produces one debate per stock, one portfolio, one backtest, and a single-column report — at roughly half the LLM debate cost. When both are selected they run **simultaneously** via `ThreadPoolExecutor` — data is fetched once and shared. Everything downstream (portfolio, backtest, report, exports) adapts to whichever profile(s) you picked.
 
 ---
 
@@ -152,12 +153,12 @@ Each direct agent individually outweighs each indirect agent (0.2167 > 0.1750). 
 
 ## Portfolio Construction
 
-After all stocks are analysed, the **PortfolioAgent** constructs two separate portfolios — one per risk profile:
+After all stocks are analysed, the **PortfolioAgent** constructs one portfolio per selected risk profile (one if you chose a single profile, two if you chose Both):
 
 - **SELL** stocks receive 0% weight and are excluded from the portfolio
 - **BUY** stocks are included regardless of convergence score
 - Weight is distributed **convergence-proportionally** across all BUY stocks, summing to 100%
-- Both profiles are signal-only — no fixed equity/bond split or stop-loss rules
+- Portfolios are signal-only — no fixed equity/bond split or stop-loss rules
 
 ---
 
@@ -173,7 +174,7 @@ After all stocks are analysed, the **PortfolioAgent** constructs two separate po
 2. **KOSPI** — fetched via pykrx (green)
 3. **KOSDAQ** — fetched via pykrx (purple)
 
-Backtesting is skipped automatically if no stocks receive a BUY signal in either profile.
+Backtesting is skipped automatically if no stocks receive a BUY signal in any selected profile.
 
 ---
 
@@ -203,11 +204,11 @@ reports/
 ├── signals/
 │   └── {ticker}_{name}/               ← one folder per company (Q1, Q2, Q3 all here)
 │       └── {as_of_date}/              ← data cutoff date — one per quarter analysed
-│           ├── averse/
+│           ├── averse/                  ← only if Risk-Averse was selected
 │           │   └── {ticker}_{name}_{as-of}_averse.md
-│           ├── neutral/
+│           ├── neutral/                 ← only if Risk-Neutral was selected
 │           │   └── {ticker}_{name}_{as-of}_neutral.md
-│           └── {ticker}_{name}_{as-of}.json   ← signals for both profiles
+│           └── {ticker}_{name}_{as-of}.json   ← signals for the selected profile(s)
 │
 ├── backtest/
 │   └── {run_date}/                    ← date the backtest was executed
@@ -232,7 +233,7 @@ Each quarterly as-of date (e.g. `2025-06-01`, `2025-09-01`, `2025-12-01`) gets i
 |---|---|
 | `signals/…/*_neutral.md` | Full agent analyses + debate log — Risk-Neutral profile |
 | `signals/…/*_averse.md` | Full agent analyses + debate log — Risk-Averse profile |
-| `signals/…/*.json` | Structured signals for both profiles — auto-created after every run |
+| `signals/…/*.json` | Structured signals for the selected profile(s) — auto-created after every run |
 | `backtest/…/Exec_Sum_*.pdf` | 2–3 page institutional PDF (buy-and-hold backtest); page 3 = calibration charts if available |
 | `backtest/…/Exec_Sum_Rebalanced_*.pdf` | 2–3 page institutional PDF (rebalancing backtest) |
 | `backtest/…/Rebalanced_*.json` | Saved weight schedule + quarterly log for future reload |
@@ -259,7 +260,7 @@ Built with **reportlab** — institutional navy (`#0D1117`) / gold (`#F0B429`) d
 | Page | Sections |
 |---|---|
 | Page 1 | §1 Stock Signals & Convergence table · §2 Portfolio Allocation cards + donut pie charts |
-| Page 2 | §3 Cross-Profile Narrative (Claude-written) · §4 Portfolio Metrics at a Glance · §5 Backtest Results chart |
+| Page 2 | §3 Investment Narrative (Claude-written; cross-profile when both are selected) · §4 Portfolio Metrics at a Glance · §5 Backtest Results chart |
 | Page 3 *(optional)* | Calibration Charts — agent accuracy bars + signal return outcomes; only appended if `calibration/` charts exist |
 
 ---
@@ -314,8 +315,8 @@ alpha_agents/
 │
 ├── backtest/
 │   ├── engine.py                  # KRX data fetcher, metrics, BacktestEngine,
-│   │                              #   plot_two_profiles(), run_with_schedule()
-│   └── runner.py                  # Runs both profiles + EW/KOSPI/KOSDAQ benchmarks
+│   │                              #   plot_profiles() (2×N), run_with_schedule()
+│   └── runner.py                  # Runs selected profile(s) + EW/KOSPI/KOSDAQ benchmarks
 │
 ├── rebalance/
 │   ├── rebalance_engine.py        # Quarterly LLM rebalance + intra-quarter monitoring
@@ -407,13 +408,19 @@ run
   Enter stock ticker (e.g. 005930): 005930
   → Looking up company on OpenDART...
   → Confirmed: 삼성전자(주)  (005930)
-  → [1/2] Fetching data...
-  → [2/2] Running debates (both profiles in parallel)...
-  → [RISK-AVERSE  ] BUY   convergence=0.920  (unanimous, 0 round(s))
-  → [RISK-NEUTRAL ] BUY   convergence=0.960  (unanimous, 0 round(s))
-
   Add another stock to the pool? (Y/N): Y
   ...
+
+  Which risk profile(s) would you like to analyse?
+    [1] Risk-Averse only
+    [2] Risk-Neutral only
+    [3] Both  (default)
+  Choice (1–3) [default 3]: 3
+
+  → [1/2] Fetching data...
+  → [2/2] Running debates (2 profiles in parallel)...
+  → [RISK-AVERSE  ] BUY   convergence=0.920  (unanimous, 0 round(s))
+  → [RISK-NEUTRAL ] BUY   convergence=0.960  (unanimous, 0 round(s))
 
   Analysis complete — proceed to backtest?
   [📈 Run Backtest]   [💾 Save & Exit]
@@ -484,7 +491,7 @@ All LLM calls use Anthropic's **prompt caching** to reduce token costs:
 | **Tier 1** — Agent system prompt + debate instructions (steelman / challenge) | ~90% cheaper from Round 1 onwards |
 | **Tier 2** — Agent's data blob (DART financials, pykrx metrics, etc.) | ~90% cheaper from Round 1 onwards |
 
-Per stock (5 agents × 2 profiles × up to 4 rounds = 40 calls): only Round 0 pays full price for system prompts and data. Rounds 1–3 hit cache for both.
+Per stock (5 agents × profiles selected × up to 4 rounds — 40 calls for both profiles, 20 for one): only Round 0 pays full price for system prompts and data. Rounds 1–3 hit cache for both. Analysing a single profile roughly halves the debate call count.
 
 ### Run Modes
 

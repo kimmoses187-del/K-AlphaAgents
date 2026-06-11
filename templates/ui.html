@@ -978,9 +978,67 @@ function _hdrText(label, round) {
   return `── ${label}  Round ${round} — ${phase} ${_SEP}`;
 }
 
+function _profileDef(key) {
+  return _PROFILES_DEF.find((p) => p.key === key)
+         || { key, cls: "", label: key.toUpperCase() };
+}
+
+// Build one profile column on first use, so a single-profile run shows a single
+// column (no empty "analyzing…" placeholder for an unselected profile).
+function _ensureProfileSection(ticker, profile) {
+  const state = tgridState[ticker];
+  if (!state) return null;
+  if (state[profile]) return state[profile];
+
+  const p    = _profileDef(profile);
+  const wrap = state.__wrap;
+
+  if (state.__hasSection) {
+    const sep = document.createElement("div");
+    sep.className = "tgrid-sep";
+    wrap.appendChild(sep);
+  }
+  state.__hasSection = true;
+
+  const hdr = document.createElement("div");
+  hdr.className = `tgrid-phdr ${p.cls}`;
+  hdr.textContent = _hdrText(p.label, 0);
+  wrap.appendChild(hdr);
+
+  const agentsDiv = document.createElement("div");
+  agentsDiv.className = "tgrid-agents";
+
+  const agentEls = {};
+  AGENTS.forEach((ag) => {
+    const row = document.createElement("div");
+    row.className = "tgrid-row";
+
+    const nameEl = document.createElement("span");
+    nameEl.className = "tgrid-name";
+    nameEl.textContent = ag;
+
+    const colonEl = document.createElement("span");
+    colonEl.className = "tgrid-colon";
+    colonEl.textContent = ":";
+
+    const statusEl = document.createElement("span");
+    statusEl.className = "tgrid-status dim";
+    statusEl.innerHTML = `<span class="spinner"></span> analyzing…`;
+
+    row.appendChild(nameEl);
+    row.appendChild(colonEl);
+    row.appendChild(statusEl);
+    agentsDiv.appendChild(row);
+    agentEls[ag] = statusEl;
+  });
+
+  wrap.appendChild(agentsDiv);
+  state[profile] = { hdr, agents: agentEls };
+  return state[profile];
+}
+
 function appendDebateCards(ticker, name) {
   currentTicker = ticker;
-  tgridState[ticker] = {};
 
   const wrap = document.createElement("div");
   wrap.className = "tgrid-wrap";
@@ -990,48 +1048,8 @@ function appendDebateCards(ticker, name) {
   tickerEl.textContent = `${ticker} · ${name} · Agent Debate`;
   wrap.appendChild(tickerEl);
 
-  _PROFILES_DEF.forEach((p, i) => {
-    if (i > 0) {
-      const sep = document.createElement("div");
-      sep.className = "tgrid-sep";
-      wrap.appendChild(sep);
-    }
-
-    const hdr = document.createElement("div");
-    hdr.className = `tgrid-phdr ${p.cls}`;
-    hdr.textContent = _hdrText(p.label, 0);
-    wrap.appendChild(hdr);
-
-    const agentsDiv = document.createElement("div");
-    agentsDiv.className = "tgrid-agents";
-
-    const agentEls = {};
-    AGENTS.forEach((ag) => {
-      const row = document.createElement("div");
-      row.className = "tgrid-row";
-
-      const nameEl = document.createElement("span");
-      nameEl.className = "tgrid-name";
-      nameEl.textContent = ag;
-
-      const colonEl = document.createElement("span");
-      colonEl.className = "tgrid-colon";
-      colonEl.textContent = ":";
-
-      const statusEl = document.createElement("span");
-      statusEl.className = "tgrid-status dim";
-      statusEl.innerHTML = `<span class="spinner"></span> analyzing…`;
-
-      row.appendChild(nameEl);
-      row.appendChild(colonEl);
-      row.appendChild(statusEl);
-      agentsDiv.appendChild(row);
-      agentEls[ag] = statusEl;
-    });
-
-    wrap.appendChild(agentsDiv);
-    tgridState[ticker][p.key] = { hdr, agents: agentEls };
-  });
+  // Columns are created lazily as each profile reports (see _ensureProfileSection).
+  tgridState[ticker] = { __wrap: wrap, __hasSection: false };
 
   chat.appendChild(wrap);
 }
@@ -1040,11 +1058,11 @@ function updateAgentCard(agent, status, signal, round, profile) {
   const ticker = currentTicker;
   if (!ticker || !profile) return;
 
-  const section = tgridState[ticker]?.[profile];
+  const section = _ensureProfileSection(ticker, profile);
   if (!section) return;
 
   // Update header for the current round
-  const label = profile === "risk-averse" ? "RISK-AVERSE" : "RISK-NEUTRAL";
+  const label = _profileDef(profile).label;
   section.hdr.textContent = _hdrText(label, round);
 
   const statusEl = section.agents[agent];

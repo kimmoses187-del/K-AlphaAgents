@@ -7,7 +7,8 @@ from typing import Optional
 
 import anthropic
 
-from config import ANTHROPIC_API_KEY, CLAUDE_MODEL
+from config import (ANTHROPIC_API_KEY, CLAUDE_MODEL, ALL_PROFILES,
+                    profile_tag, profile_label)
 from tools.dart_tools import fetch_and_format_reports
 from tools.dart_report_planner import plan_reports, build_coverage_note, describe_plan
 from tools.dart_document_tools import fetch_document_narrative          # Gap 1
@@ -28,7 +29,7 @@ from report.exporters import export_portfolio_xlsx, export_reports_docx  # Gap 7
 from backtest.runner import run_backtest
 
 REPORTS_DIR = "reports"
-PROFILES    = ("risk-averse", "risk-neutral")
+PROFILES    = ALL_PROFILES   # default set; a run may use a subset (see analyze_stock)
 
 _claude = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
@@ -71,7 +72,8 @@ class OrchestratorAgent:
     def analyze_stock(self, stock_code: str, as_of_date: datetime,
                       corp_info: dict, stage: str = "initial",
                       progress_cb=None, output_dir: Optional[str] = None,
-                      calibration_context: dict = None) -> dict:
+                      calibration_context: dict = None,
+                      profiles=None) -> dict:
         """
         Fetch data and run the 5-agent debate for one stock.
         Saves per-profile markdown reports.
@@ -81,7 +83,11 @@ class OrchestratorAgent:
         output_dir : if provided, save files here instead of the default path.
                      Used by RebalanceEngine to place Q2+ reports under
                      backtest/rebalance/Q{n}/{ticker}_{name}/.
+        profiles   : which risk profiles to run (subset of ALL_PROFILES).
+                     Defaults to all profiles; a single-element tuple yields a
+                     single-profile analysis.
         """
+        profiles     = tuple(profiles) if profiles else ALL_PROFILES
         company_name = corp_info["corp_name"]
 
         print(f"\n{'─'*60}")
@@ -95,7 +101,8 @@ class OrchestratorAgent:
                                           stage=stage, progress_cb=progress_cb)
         debate_results = self._run_debates(company_name, data,
                                            progress_cb=progress_cb,
-                                           calibration_context=calibration_context)
+                                           calibration_context=calibration_context,
+                                           profiles=profiles)
 
         # ── Output paths ──────────────────────────────────────────────────────
         # Structure: reports/signals/{ticker}_{name}/{as_of_date}/
@@ -116,14 +123,14 @@ class OrchestratorAgent:
 
         # Per-stock markdown reports — each profile in its own subfolder
         report_files = {}
-        for profile in PROFILES:
+        for profile in profiles:
             report_md = generate_report(
                 debate_results[profile], corp_info,
                 data["metrics"], data["ticker_str"], profile,
                 portfolio=None,
                 as_of_date=as_of_date,
             )
-            tag         = "averse" if profile == "risk-averse" else "neutral"
+            tag         = profile_tag(profile)
             profile_dir = os.path.join(stock_dir, tag)
             os.makedirs(profile_dir, exist_ok=True)
             filename    = os.path.join(profile_dir, f"{base_name}_{tag}.md")
@@ -133,7 +140,7 @@ class OrchestratorAgent:
 
         # Per-stock signal printout
         print(f"\n  ── Signals for {company_name} ({stock_code}) ──")
-        for profile in PROFILES:
+        for profile in profiles:
             dr         = debate_results[profile]
             conviction = compute_conviction(dr)
             print(f"  [{profile.upper():<14}] {dr['final_signal']:<4}  "
@@ -189,11 +196,12 @@ class OrchestratorAgent:
 
         # ── Multi-stock portfolio construction ────────────────────────────
         portfolios = construct_portfolio(stock_debate_results)
+        profiles   = list(portfolios.keys())   # the profiles actually analysed
 
         print(f"\n{'='*60}")
         print(f"  PORTFOLIO SUMMARY")
         print(f"{'='*60}")
-        for profile in PROFILES:
+        for profile in profiles:
             po = portfolios[profile]
             n_buy = sum(1 for a in po["stock_allocations"].values() if a["weight"] > 0)
             print(f"\n  [{profile.upper()}]  {n_buy} stock(s) selected")
@@ -204,11 +212,8 @@ class OrchestratorAgent:
                 print(f"    {code} ({name:<15}): {alloc['signal']:<4}  "
                       f"convergence={alloc['conviction']:.3f}  {status}")
 
-        # ── Skip backtest if no equity positions in either profile ───────
-        any_equity = (
-            portfolios["risk-averse"]["position_taken"] or
-            portfolios["risk-neutral"]["position_taken"]
-        )
+        # ── Skip backtest if no equity positions in any analysed profile ──
+        any_equity = any(portfolios[p]["position_taken"] for p in profiles)
 
         date_tag  = as_of_date.strftime("%Y-%m-%d")
         stock_tag = "_".join(all_results.keys())
@@ -218,7 +223,8 @@ class OrchestratorAgent:
         pdf_path  = os.path.join(bh_dir, f"Exec_Sum_{date_tag}.pdf")
 
         if not any_equity:
-            print("\n  No stocks were recommended for purchase by either profile.")
+            scope = "either profile" if len(profiles) > 1 else "the selected profile"
+            print(f"\n  No stocks were recommended for purchase by {scope}.")
             print("  Backtesting skipped — capital fully preserved in bond allocation.")
             backtest_results = None
         else:
@@ -464,15 +470,18 @@ class OrchestratorAgent:
         }
 
     def _run_debates(self, company_name: str, data: dict,
-                     progress_cb=None, calibration_context: dict = None) -> dict:
+                     progress_cb=None, calibration_context: dict = None,
+                     profiles=None) -> dict:
         from debate.terminal_display import DebateGrid
 
-        print("\n  [2/2] Running debates (both profiles in parallel)...")
+        profiles = tuple(profiles) if profiles else ALL_PROFILES
+        plural   = "profiles in parallel" if len(profiles) > 1 else "profile"
+        print(f"\n  [2/2] Running debates ({len(profiles)} {plural})...")
 
         # Build the shared in-place grid (terminal only; skipped if web callback active)
         grid = None
         if not progress_cb:
-            grid = DebateGrid()
+            grid = DebateGrid(profiles)
             grid.init()
 
         def _debate(profile: str) -> tuple:
@@ -492,8 +501,8 @@ class OrchestratorAgent:
 
         results = {}
         try:
-            with ThreadPoolExecutor(max_workers=2) as pool:
-                futures = {pool.submit(_debate, p): p for p in PROFILES}
+            with ThreadPoolExecutor(max_workers=max(len(profiles), 1)) as pool:
+                futures = {pool.submit(_debate, p): p for p in profiles}
                 for future in as_completed(futures):
                     profile, result = future.result()
                     results[profile] = result
@@ -504,9 +513,15 @@ class OrchestratorAgent:
 
     def _llm_narrative(self, company_names: dict, portfolios: dict,
                        stock_debate_results: dict) -> str:
+        profiles  = list(portfolios.keys())
+        multi     = len(profiles) > 1
+
+        def _n_buy(po):
+            return sum(1 for a in po["stock_allocations"].values() if a["weight"] > 0)
+
         stock_lines = []
         for code, name in company_names.items():
-            for profile in PROFILES:
+            for profile in profiles:
                 dr  = stock_debate_results[code][profile]
                 po  = portfolios[profile]["stock_allocations"][code]
                 stock_lines.append(
@@ -516,8 +531,28 @@ class OrchestratorAgent:
                     f"{dr['consensus_type']} after {dr['consensus_round']} round(s)"
                 )
 
-        ra_po = portfolios["risk-averse"]
-        rn_po = portfolios["risk-neutral"]
+        portfolio_lines = "\n".join(
+            f"{profile_label(p)} portfolio: {_n_buy(portfolios[p])} BUY stock(s) selected — "
+            f"position taken: {'Yes' if portfolios[p]['position_taken'] else 'No'}"
+            for p in profiles
+        )
+
+        if multi:
+            instructions = (
+                "Write a 4–5 sentence professional cross-profile synthesis in plain prose "
+                "(no bullet points, no markdown). Cover: (1) which stocks have strong / weak "
+                "signals and why, (2) where the profiles agree or diverge, (3) the "
+                "convergence-driven weight differences, (4) the recommended action for each "
+                "investor type, (5) one key risk to monitor across the pool."
+            )
+        else:
+            instructions = (
+                f"Write a 4–5 sentence professional summary in plain prose (no bullet points, "
+                f"no markdown) for a {profile_label(profiles[0])} investor. Cover: (1) which "
+                "stocks have strong / weak signals and why, (2) how convergence drove the "
+                "portfolio weights, (3) the recommended action, (4) one key risk to monitor "
+                "across the pool."
+            )
 
         prompt = f"""You are writing a concise executive summary for a professional multi-stock equity research report.
 
@@ -526,16 +561,9 @@ Stocks analysed: {', '.join(f"{c} ({n})" for c, n in company_names.items())}
 Per-stock results:
 {chr(10).join(stock_lines)}
 
-Risk-Averse portfolio:  {sum(1 for a in ra_po['stock_allocations'].values() if a['weight']>0)} BUY stock(s) selected
-  Position taken: {'Yes' if ra_po['position_taken'] else 'No — no stocks recommended'}
+{portfolio_lines}
 
-Risk-Neutral portfolio: {sum(1 for a in rn_po['stock_allocations'].values() if a['weight']>0)} BUY stock(s) selected
-  Position taken: {'Yes' if rn_po['position_taken'] else 'No — no stocks recommended'}
-
-Write a 4–5 sentence professional cross-profile synthesis in plain prose (no bullet points, no markdown).
-Cover: (1) which stocks have strong / weak signals and why, (2) where the two profiles agree or diverge,
-(3) the convergence-driven weight differences, (4) the recommended action for each investor type,
-(5) one key risk to monitor across the pool.
+{instructions}
 """
         try:
             resp = _claude.messages.create(
@@ -545,8 +573,7 @@ Cover: (1) which stocks have strong / weak signals and why, (2) where the two pr
             )
             return resp.content[0].text.strip()
         except Exception:
-            return (
-                f"Risk-Averse: {sum(1 for a in ra_po['stock_allocations'].values() if a['weight']>0)} BUY stock(s) — "
-                f"Risk-Neutral: {sum(1 for a in rn_po['stock_allocations'].values() if a['weight']>0)} BUY stock(s). "
-                "LLM narrative unavailable — check API key."
+            summary = " — ".join(
+                f"{profile_label(p)}: {_n_buy(portfolios[p])} BUY stock(s)" for p in profiles
             )
+            return f"{summary}. LLM narrative unavailable — check API key."

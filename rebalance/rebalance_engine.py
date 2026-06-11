@@ -27,12 +27,13 @@ from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 
+from config import ALL_PROFILES
 from orchestrator.orchestrator_agent import OrchestratorAgent, _safe_filename
 from portfolio.portfolio_agent import construct_portfolio
 from rebalance.event_monitor import check_triggers, compute_momentum_scores
 from rebalance.weight_adjuster import adjust_weights
 
-PROFILES    = ("risk-averse", "risk-neutral")
+PROFILES    = ALL_PROFILES
 REPORTS_DIR = "reports"
 
 
@@ -108,7 +109,15 @@ class RebalanceEngine:
         """
         quarters      = get_quarter_dates(start_date, end_date)
         quarterly_log = []
-        weight_schedule = {p: [] for p in PROFILES}
+
+        # Active profiles = whatever the (reused) Q1 analysis actually ran.
+        # Falls back to the full set for a cold rebalance with no prior results.
+        if initial_results:
+            first           = next(iter(initial_results.values()))
+            active_profiles = list(first["debate_results"].keys())
+        else:
+            active_profiles = list(PROFILES)
+        weight_schedule = {p: [] for p in active_profiles}
 
         print(f"\n{'='*60}")
         print(f"  REBALANCING ENGINE")
@@ -137,11 +146,12 @@ class RebalanceEngine:
                 portfolios = construct_portfolio(stock_debate_results)
             else:
                 all_results, portfolios = self._run_quarter_analysis(
-                    stock_codes, corp_infos, q_start, q_num=q_num
+                    stock_codes, corp_infos, q_start, q_num=q_num,
+                    profiles=active_profiles,
                 )
 
             # Quarter-start weights → schedule
-            for profile in PROFILES:
+            for profile in active_profiles:
                 weight_schedule[profile].append(
                     (q_start, dict(portfolios[profile]["weights"]))
                 )
@@ -163,7 +173,7 @@ class RebalanceEngine:
                     q_start, q_end, portfolios, stock_codes
                 )
                 total_events = sum(len(v) for v in event_weights.values())
-                for profile in PROFILES:
+                for profile in active_profiles:
                     weight_schedule[profile].extend(event_weights[profile])
                 if total_events:
                     print(f"  [EventMonitor] {total_events} re-weight event(s) recorded.")
@@ -180,6 +190,7 @@ class RebalanceEngine:
         corp_infos: Dict[str, dict],
         as_of_date: datetime,
         q_num: int = 1,
+        profiles=None,
     ) -> Tuple[dict, dict]:
         """Run full 5-agent debate for every stock; return (all_results, portfolios).
 
@@ -204,7 +215,7 @@ class RebalanceEngine:
 
             result = self.orchestrator.analyze_stock(
                 code, as_of_date, corp_infos[code],
-                stage=stage, output_dir=output_dir
+                stage=stage, output_dir=output_dir, profiles=profiles,
             )
             all_results[code] = result
 
@@ -242,14 +253,15 @@ class RebalanceEngine:
             except Exception as e:
                 print(f"    [EventMonitor] Cannot fetch {ticker}: {e}")
 
+        profiles = list(portfolios.keys())
         if not raw_prices:
-            return {p: [] for p in PROFILES}
+            return {p: [] for p in profiles}
 
         price_df = pd.DataFrame(raw_prices).dropna(how="all")
 
-        event_weights = {p: [] for p in PROFILES}
+        event_weights = {p: [] for p in profiles}
 
-        for profile in PROFILES:
+        for profile in profiles:
             portfolio = portfolios[profile]
             holdings  = {
                 code: alloc["weight"]

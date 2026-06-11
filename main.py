@@ -9,6 +9,7 @@ from tools.dart_tools import lookup_company
 from orchestrator.orchestrator_agent import OrchestratorAgent
 from calibration import load_or_generate_calibration
 from calibration.pipeline import get_existing_signal_dates
+from config import ALL_PROFILES, profile_label
 
 REPORTS_DIR = "reports"
 
@@ -20,6 +21,26 @@ def _ask_date(prompt: str) -> datetime:
             return datetime.strptime(raw, "%Y/%m/%d")
         except ValueError:
             print("  Invalid format. Please use YYYY/MM/DD (e.g. 2024/02/01).")
+
+
+def _ask_profiles() -> tuple:
+    """Ask which risk profile(s) to analyse. Returns a tuple of profile keys."""
+    print("\n  Which risk profile(s) would you like to analyse?")
+    for i, p in enumerate(ALL_PROFILES, 1):
+        print(f"    [{i}] {profile_label(p)} only")
+    print(f"    [{len(ALL_PROFILES) + 1}] Both  (default)")
+    both = len(ALL_PROFILES) + 1
+    while True:
+        raw = input(f"\n  Choice (1–{both}) [default {both}]: ").strip()
+        if raw == "":
+            return tuple(ALL_PROFILES)
+        if raw.isdigit():
+            n = int(raw)
+            if 1 <= n <= len(ALL_PROFILES):
+                return (ALL_PROFILES[n - 1],)
+            if n == both:
+                return tuple(ALL_PROFILES)
+        print(f"  Please enter a number from 1 to {both}.")
 
 
 # ── Load-saved-signals flow ───────────────────────────────────────────────────
@@ -599,7 +620,14 @@ def _new_analysis_flow(orchestrator: OrchestratorAgent) -> tuple[dict, datetime]
         if more != "Y":
             break
 
-    # ── Phase 2: load or generate calibration context ─────────────────────────
+    # ── Phase 2: risk-profile selection ───────────────────────────────────────
+    profiles = _ask_profiles()
+    if len(profiles) == 1:
+        print(f"  → Analysing {profile_label(profiles[0])} only.")
+    else:
+        print("  → Analysing both risk profiles.")
+
+    # ── Phase 3: load or generate calibration context ─────────────────────────
     stock_codes = list(corp_infos.keys())
     calibration_context: dict = {}
 
@@ -630,12 +658,13 @@ def _new_analysis_flow(orchestrator: OrchestratorAgent) -> tuple[dict, datetime]
     else:
         print("\n  ⚪ No prior signals found — running without calibration context (cold start).")
 
-    # ── Phase 3: run analysis with calibration injected ───────────────────────
+    # ── Phase 4: run analysis with calibration injected ───────────────────────
     all_results: dict = {}
     for stock_code, corp_info in corp_infos.items():
         result = orchestrator.analyze_stock(
             stock_code, as_of_date, corp_info,
             calibration_context=calibration_context,
+            profiles=profiles,
         )
         all_results[stock_code] = result
 
@@ -680,8 +709,8 @@ def _save_rebalancing_json(
             "start":      q["start"].strftime("%Y-%m-%d"),
             "end":        q["end"].strftime("%Y-%m-%d"),
             "portfolios": {
-                p: _ser_portfolio(q["portfolios"][p])
-                for p in ("risk-averse", "risk-neutral")
+                p: _ser_portfolio(po)
+                for p, po in q["portfolios"].items()
             },
         }
         for q in quarterly_log
@@ -783,11 +812,13 @@ def _run_rebalancing(
     )
 
     # ── LLM narrative ─────────────────────────────────────────────────────
+    # Summarise signals from the first analysed profile (any profile present).
+    summary_profile = next(iter(quarterly_log[0]["portfolios"].keys()))
     q_summary = "\n".join(
         f"  Q{q['quarter']} ({q['start'].strftime('%Y-%m-%d')}): "
         + ", ".join(
             f"{code} → "
-            f"{q['portfolios']['risk-neutral']['stock_allocations'][code]['signal']}"
+            f"{q['portfolios'][summary_profile]['stock_allocations'][code]['signal']}"
             for code in stock_codes
         )
         for q in quarterly_log
@@ -918,14 +949,13 @@ def _run_precomputed_rebalancing(quarterly_data: dict, sorted_dates: list) -> No
     import anthropic as _ant
     from config import ANTHROPIC_API_KEY, CLAUDE_MODEL
 
-    PROFILES = ("risk-averse", "risk-neutral")
-
     print(f"\n{'='*60}")
     print(f"  PRE-COMPUTED QUARTERLY BACKTEST")
     print(f"  {len(sorted_dates)} quarter(s): {' → '.join(sorted_dates)}")
     print(f"{'='*60}")
 
-    weight_schedule: dict[str, list] = {p: [] for p in PROFILES}
+    # Profiles are derived from the saved signals (single- or multi-profile).
+    weight_schedule: dict[str, list] = {}
     quarterly_log   = []
     all_stock_codes: set  = set()
     company_names:   dict = {}
@@ -942,8 +972,9 @@ def _run_precomputed_rebalancing(quarterly_data: dict, sorted_dates: list) -> No
             all_stock_codes.add(code)
             company_names[code] = r["company_name"]
 
-        for profile in PROFILES:
-            weight_schedule[profile].append((q_date, dict(portfolios[profile]["weights"])))
+        for profile in portfolios.keys():
+            weight_schedule.setdefault(profile, []).append(
+                (q_date, dict(portfolios[profile]["weights"])))
             po      = portfolios[profile]
             n_held  = sum(1 for a in po["stock_allocations"].values() if a["weight"] > 0)
             print(f"  Q{q_num} {date_str} [{profile.upper():<14}] {n_held} stock(s) selected")
@@ -998,19 +1029,20 @@ def _run_precomputed_rebalancing(quarterly_data: dict, sorted_dates: list) -> No
 
     # Check that at least one risk profile engine was produced
     has_results = any(backtest_results.get(p) is not None
-                      for p in ("risk-averse", "risk-neutral"))
+                      for p in weight_schedule.keys())
     if not has_results:
         print("\n  ⚠️  No backtest results produced (all profiles had all-SELL signals). "
               "Nothing to save.")
         return
 
-    # LLM narrative (best-effort)
+    # LLM narrative (best-effort) — summarise the first analysed profile
     date_tag = start_date.strftime("%Y-%m-%d")
+    summary_profile = next(iter(quarterly_log[0]["portfolios"].keys()))
     q_summary = "\n".join(
         f"  Q{q['quarter']} ({q['start'].strftime('%Y-%m-%d')}): "
         + ", ".join(
-            f"{code} → {q['portfolios']['risk-neutral']['stock_allocations'][code]['signal']}"
-            for code in stock_codes if code in q["portfolios"]["risk-neutral"]["stock_allocations"]
+            f"{code} → {q['portfolios'][summary_profile]['stock_allocations'][code]['signal']}"
+            for code in stock_codes if code in q["portfolios"][summary_profile]["stock_allocations"]
         )
         for q in quarterly_log
     )

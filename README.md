@@ -9,7 +9,7 @@ A partial replication of **BlackRock's AlphaAgents** (Zhao et al., 2025) adapted
 ## System Overview
 
 ```
-python3 main.py
+run
         │
         ├── [N] New Analysis
         │       │
@@ -390,7 +390,7 @@ BOK_API_KEY=your_bok_ecos_key      # optional — ecos.bok.or.kr/api (free, inst
 ## Usage
 
 ```bash
-python3 main.py
+run
 ```
 
 #### [N] New Analysis
@@ -490,13 +490,13 @@ Per stock (5 agents × 2 profiles × up to 4 rounds = 40 calls): only Round 0 pa
 
 ```bash
 # Full quality — for actual investment decisions
-python3 main.py
+run
 
 # Pipeline testing — zero token cost, stub BUY responses
-DEBUG_MODE=true python3 main.py
+DEBUG_MODE=true run
 
 # Real analysis at ~20x lower cost — for development/debugging
-CLAUDE_MODEL=claude-haiku-4-5 python3 main.py
+CLAUDE_MODEL=claude-haiku-4-5 run
 ```
 
 ---

@@ -18,8 +18,8 @@ The graph is a map, not the territory — still read the real code for the lines
 ## Run & verify (no test suite)
 
 - **Debug run — no LLM cost, exercises the full pipeline (primary regression check):**
-  `DEBUG_MODE=true python3 main.py`
-- CLI: `python3 main.py`   ·   Web: `python3 web/app.py` (Flask-SocketIO; also the Render start command)
+  `DEBUG_MODE=true run`
+- CLI: `run`   ·   Web: `python3 web/app.py` (Flask-SocketIO; also the Render start command)
 - Env: `ANTHROPIC_API_KEY`, `DART_API_KEY` required; `OPENAI_API_KEY` (fallback), `BOK_API_KEY` (optional).
   Model via `CLAUDE_MODEL` (default `claude-sonnet-4-6`).
 

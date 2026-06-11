@@ -12,6 +12,13 @@ locate *before* opening source files — you should not need to read the folder 
 - **Locate / trace:** `graphify query "<question>"` (e.g. `graphify query "how does the debate flow work"`).
 - Then read only the specific files the task actually touches.
 - **After changing code, refresh the graph** so it stays accurate: `graphify . --update`.
+  - graphify reads `ANTHROPIC_API_KEY` from the **shell env**, not the project `.env` (which only
+    loads inside the Python app via python-dotenv). Either export it in your shell, or prefix:
+    `export $(grep ANTHROPIC_API_KEY .env | xargs) && graphify . --update`.
+  - `--update` only re-extracts. If communities / `GRAPH_REPORT.md` matter, follow with
+    `graphify cluster-only .` (the tool prints this hint at the end of an update).
+  - graphify is an isolated `uv` tool (`graphifyy`); its venv needs `anthropic` for the claude
+    backend. If you see "requires the anthropic package", run `uv tool install graphifyy --with anthropic`.
 
 The graph is a map, not the territory — still read the real code for the lines you edit.
 

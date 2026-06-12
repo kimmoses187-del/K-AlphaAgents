@@ -2,7 +2,7 @@
 ### LLM Multi-Agent System for Korean Equity Research
 
 A partial replication of **BlackRock's AlphaAgents** (Zhao et al., 2025) adapted for Korean equities (KOSPI/KOSDAQ).  
-**Five specialized AI agents** collaborate, debate, and reach a consensus **BUY / SELL** recommendation under your chosen investor profile — **Risk-Averse**, **Risk-Neutral**, or both at once — then automatically construct a portfolio and backtest it.
+**Up to five specialized AI agents** collaborate, debate, and reach a consensus **BUY / SELL** recommendation under your chosen investor profile — **Risk-Averse**, **Risk-Neutral**, or both at once — then automatically construct a portfolio and backtest it. You pick how many agents debate (an **odd** number — 1, 3, or 5 — so the majority vote never ties) and which risk profile(s) to run.
 
 ---
 
@@ -15,7 +15,8 @@ run
         │       │
         │       ├── Enter as-of date  (YYYY/MM/DD)
         │       ├── Enter stock pool  (one or more tickers)
-        │       └── Pick risk profile(s)  (Averse / Neutral / Both)
+        │       ├── Pick risk profile(s)  (Averse / Neutral / Both)
+        │       └── Pick agents  (odd count: 1 / 3 / 5)
         │               │
         │               ▼
         │   ┌───────────────────────────────────────────┐
@@ -23,8 +24,8 @@ run
         │   │                                           │
         │   │  For each stock:                          │
         │   │    1. Fetch data  (DART + pykrx)          │
-        │   │    2. Run 5-agent debate × selected       │
-        │   │       profile(s)  (parallel)             │
+        │   │    2. Run debate: selected agent(s)       │
+        │   │       × selected profile(s)  (parallel)  │
         │   │    3. Save  .md reports + .json signals   │
         │   │       → reports/signals/{ticker}_{name}/  │
         │   │                                           │
@@ -73,6 +74,8 @@ run
 
 ## The Five Agents
 
+The full roster is five agents. Each run uses an **odd-sized subset** of your choice (1, 3, or 5) so the majority vote always resolves; conviction weighting re-normalises over whichever agents you pick.
+
 | Agent | Data Source | Analytical Lens |
 |---|---|---|
 | **FundamentalAgent** | OpenDART — stage-aware: 3 annual FYs + all interim reports (initial) / 1 annual + 1 interim (rebalancing) · **DART full filing documents** (MD&A, risk factors, business description) · **DCF + comps valuation** · **Naver analyst consensus** (target price, implied upside) | Revenue trends, margins, cash flow quality, debt, governance, intrinsic value vs market price |
@@ -110,18 +113,19 @@ This two-step approach ensures agents always consider the full picture before ap
 
 ```
 Round 0 — Independent Analysis  (Steelman enforced)
-  All 5 agents analyse in isolation → each issues BUY or SELL
+  The selected agents (odd count: 1/3/5) analyse in isolation → each issues BUY or SELL
   Each agent must argue the strongest opposing case before concluding
-  If all 5 agree → TERMINATE  (unanimous, 0 debate rounds)
+  If all selected agents agree → TERMINATE  (unanimous, 0 debate rounds)
 
 Rounds 1–3 — Structured Debate  (Active challenge enforced)
-  Each agent reads all 4 peers' analyses
+  Each agent reads all of its peers' analyses
   Must cite specific conflicting claims and explain why they are wrong
   Explicitly states: MAINTAINING or CHANGING position, and why
-  After each round: if all 5 agree → TERMINATE  (unanimous)
+  After each round: if all selected agents agree → TERMINATE  (unanimous)
 
 After Round 3 — Majority Vote
-  3-of-5 wins  (5-0, 4-1, or 3-2 — no tie possible)
+  Strict majority wins. The agent count is forced ODD (1/3/5) so a binary
+  BUY/SELL vote can never tie (e.g. with 5: 5-0, 4-1, or 3-2).
 ```
 
 ---
@@ -133,7 +137,9 @@ Convergence is computed using a weighted vote combined with a round-speed bonus:
 ```
 convergence = (weighted_vote × 0.6) + (round_score × 0.4)
 
-weighted_vote : sum of agent weights for agents agreeing with the final signal
+weighted_vote : share of agent weight held by agents agreeing with the final
+                signal (re-normalised over the agents that ran, so a 3-agent
+                unanimous vote still scores a full 1.0)
 round_score   : 1.0 at round 0 (instant consensus), decays to 0.0 at round 3
 ```
 
@@ -304,7 +310,7 @@ alpha_agents/
 │   └── naver_tools.py             # Naver Finance: analyst consensus target price + implied upside
 │
 ├── debate/
-│   └── debate_manager.py          # 5-agent round-robin debate + majority vote
+│   └── debate_manager.py          # round-robin debate (selected agents) + majority vote
 │
 ├── orchestrator/
 │   └── orchestrator_agent.py      # Pipeline director: fetch → debate → portfolio
@@ -417,6 +423,12 @@ run
     [3] Both  (default)
   Choice (1–3) [default 3]: 3
 
+  Which agents should debate this pool?
+    [1] Fundamental   [2] Sentiment   [3] Technical   [4] Market   [5] Macro
+    [A] All five  (default)
+  Pick an ODD number of agents (1, 3, or 5) so the vote can't tie.
+  Enter agent numbers (e.g. 1,3,5) or A [default A]: A
+
   → [1/2] Fetching data...
   → [2/2] Running debates (2 profiles in parallel)...
   → [RISK-AVERSE  ] BUY   convergence=0.920  (unanimous, 0 round(s))
@@ -491,7 +503,7 @@ All LLM calls use Anthropic's **prompt caching** to reduce token costs:
 | **Tier 1** — Agent system prompt + debate instructions (steelman / challenge) | ~90% cheaper from Round 1 onwards |
 | **Tier 2** — Agent's data blob (DART financials, pykrx metrics, etc.) | ~90% cheaper from Round 1 onwards |
 
-Per stock (5 agents × profiles selected × up to 4 rounds — 40 calls for both profiles, 20 for one): only Round 0 pays full price for system prompts and data. Rounds 1–3 hit cache for both. Analysing a single profile roughly halves the debate call count.
+Per stock (agents selected × profiles selected × up to 4 rounds — e.g. 40 calls for 5 agents × both profiles, 12 for 3 agents × one profile): only Round 0 pays full price for system prompts and data. Rounds 1–3 hit cache. Choosing fewer agents and/or one profile cuts the debate call count proportionally.
 
 ### Run Modes
 

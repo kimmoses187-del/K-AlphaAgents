@@ -163,7 +163,7 @@ def _new_analysis_flow(session, orchestrator):
             break
 
     # ── Phase 3: Risk-profile selection ───────────────────────────────────────
-    from config import ALL_PROFILES, profile_label
+    from config import ALL_PROFILES, profile_label, ALL_AGENTS, agent_label
     profile_opts = [
         {"label": f"{profile_label(p)} only", "value": p} for p in ALL_PROFILES
     ] + [{"label": "⚖️ Both profiles", "value": "__both__"}]
@@ -175,7 +175,37 @@ def _new_analysis_flow(session, orchestrator):
     )
     profiles = tuple(ALL_PROFILES) if chosen == "__both__" else (chosen,)
 
-    # ── Phase 4: Load or generate calibration context ─────────────────────────
+    # ── Phase 4: Agent selection (odd count required for a clean vote) ────────
+    agent_opts = [{"label": agent_label(a), "value": a} for a in ALL_AGENTS]
+    while True:
+        raw = session.ask(
+            "Which agents should debate?",
+            subtext="Pick an ODD number (1, 3, or 5) so the majority vote can't tie",
+            input_type="checkboxes",
+            options=agent_opts,
+        )
+        picked = [v.strip() for v in raw.split(",") if v.strip() in ALL_AGENTS]
+        agents = tuple(a for a in ALL_AGENTS if a in picked)
+        if not agents:
+            session.message("⚠ Select at least one agent.", msg_type="warning")
+            continue
+        if len(agents) % 2 == 0:
+            session.message(
+                f"⚠ You picked {len(agents)} agents — even counts can tie. "
+                "Pick an odd number (1, 3, or 5).",
+                msg_type="warning",
+            )
+            continue
+        break
+    if len(agents) == len(ALL_AGENTS):
+        session.message("✓ Using all five agents.", msg_type="info")
+    else:
+        session.message(
+            f"✓ Using {len(agents)} agents: {', '.join(agent_label(a) for a in agents)}",
+            msg_type="info",
+        )
+
+    # ── Phase 5: Load or generate calibration context ─────────────────────────
     stock_codes = list(corp_infos.keys())
     calibration_context: dict = {}
 
@@ -219,7 +249,7 @@ def _new_analysis_flow(session, orchestrator):
             msg_type="info",
         )
 
-    # ── Phase 5: Analyze each stock with calibration injected ─────────────────
+    # ── Phase 6: Analyze each stock with calibration injected ─────────────────
     def make_cb(s):
         def cb(event, *args):
             if event == "fetch":
@@ -239,7 +269,7 @@ def _new_analysis_flow(session, orchestrator):
             stock_code, as_of_date, corp_info,
             progress_cb=make_cb(session),
             calibration_context=calibration_context,
-            profiles=profiles,
+            profiles=profiles, agents=agents,
         )
         all_results[stock_code] = result
 

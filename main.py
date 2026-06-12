@@ -9,7 +9,7 @@ from tools.dart_tools import lookup_company
 from orchestrator.orchestrator_agent import OrchestratorAgent
 from calibration import load_or_generate_calibration
 from calibration.pipeline import get_existing_signal_dates
-from config import ALL_PROFILES, profile_label
+from config import ALL_PROFILES, profile_label, ALL_AGENTS, agent_label
 
 REPORTS_DIR = "reports"
 
@@ -41,6 +41,39 @@ def _ask_profiles() -> tuple:
             if n == both:
                 return tuple(ALL_PROFILES)
         print(f"  Please enter a number from 1 to {both}.")
+
+
+def _ask_agents() -> tuple:
+    """Ask which agents should debate. Enforces an ODD count (1/3/5) so the
+    majority vote always resolves. Returns a tuple of agent names in canonical
+    order."""
+    print("\n  Which agents should debate this pool?")
+    for i, a in enumerate(ALL_AGENTS, 1):
+        print(f"    [{i}] {agent_label(a)}")
+    print("    [A] All five  (default)")
+    print("  Pick an ODD number of agents (1, 3, or 5) so the vote can't tie.")
+    while True:
+        raw = input("\n  Enter agent numbers (e.g. 1,3,5) or A [default A]: ").strip().upper()
+        if raw == "" or raw == "A":
+            return tuple(ALL_AGENTS)
+        try:
+            idxs = [int(x) for x in raw.split(",") if x.strip()]
+        except ValueError:
+            print("  Invalid input — use numbers like 1,3,5.")
+            continue
+        if any(i < 1 or i > len(ALL_AGENTS) for i in idxs):
+            print(f"  Numbers must be between 1 and {len(ALL_AGENTS)}.")
+            continue
+        # De-duplicate, keep canonical order
+        chosen = [a for a in ALL_AGENTS if ALL_AGENTS.index(a) + 1 in idxs]
+        if not chosen:
+            print("  Select at least one agent.")
+            continue
+        if len(chosen) % 2 == 0:
+            print(f"  You picked {len(chosen)} agents — that's even and could tie. "
+                  "Pick an odd number (1, 3, or 5).")
+            continue
+        return tuple(chosen)
 
 
 # ── Load-saved-signals flow ───────────────────────────────────────────────────
@@ -620,12 +653,19 @@ def _new_analysis_flow(orchestrator: OrchestratorAgent) -> tuple[dict, datetime]
         if more != "Y":
             break
 
-    # ── Phase 2: risk-profile selection ───────────────────────────────────────
+    # ── Phase 2: risk-profile + agent selection ───────────────────────────────
     profiles = _ask_profiles()
     if len(profiles) == 1:
         print(f"  → Analysing {profile_label(profiles[0])} only.")
     else:
         print("  → Analysing both risk profiles.")
+
+    agents = _ask_agents()
+    if len(agents) == len(ALL_AGENTS):
+        print("  → Using all five agents.")
+    else:
+        print(f"  → Using {len(agents)} agents: "
+              f"{', '.join(agent_label(a) for a in agents)}.")
 
     # ── Phase 3: load or generate calibration context ─────────────────────────
     stock_codes = list(corp_infos.keys())
@@ -664,7 +704,7 @@ def _new_analysis_flow(orchestrator: OrchestratorAgent) -> tuple[dict, datetime]
         result = orchestrator.analyze_stock(
             stock_code, as_of_date, corp_info,
             calibration_context=calibration_context,
-            profiles=profiles,
+            profiles=profiles, agents=agents,
         )
         all_results[stock_code] = result
 

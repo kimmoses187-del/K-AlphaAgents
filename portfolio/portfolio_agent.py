@@ -25,9 +25,11 @@ def compute_conviction(debate_result: dict) -> float:
 
     conviction = (weighted_vote × 0.6) + (round_score × 0.4)
 
-    weighted_vote : sum of AGENT_WEIGHTS for agents whose final signal
-                    matches the portfolio's final_signal (range 0–1,
-                    since AGENT_WEIGHTS sum to 1.0)
+    weighted_vote : share of AGENT_WEIGHTS held by agents whose final signal
+                    matches the portfolio's final_signal (range 0–1). The
+                    weights are re-normalised over the agents that actually
+                    debated, so an odd-sized subset (1/3/5 agents) still yields
+                    a full 1.0 when its agents agree.
     round_score   : 1.0 at round 0 (instant consensus), decays to 0.0
                     at MAX_DEBATE_ROUNDS (grinding majority vote)
     """
@@ -35,10 +37,14 @@ def compute_conviction(debate_result: dict) -> float:
     rounds_taken  = debate_result["consensus_round"]
     final_results = debate_result["debate_log"][-1]["results"]
 
-    vote_score = sum(
+    # Re-normalise over the agents present (full set sums to 1.0 → no change;
+    # a subset sums to <1.0 → scale up so agreement still maxes at 1.0).
+    present_total = sum(AGENT_WEIGHTS.get(r["agent"], 0.20) for r in final_results)
+    matched       = sum(
         AGENT_WEIGHTS.get(r["agent"], 0.20)
         for r in final_results if r["signal"] == final_signal
     )
+    vote_score = matched / present_total if present_total > 0 else 0.0
     round_score = (
         1.0 - (rounds_taken / MAX_DEBATE_ROUNDS)
         if MAX_DEBATE_ROUNDS > 0 else 1.0

@@ -110,11 +110,15 @@ class RebalanceEngine:
         quarters      = get_quarter_dates(start_date, end_date)
         quarterly_log = []
 
-        # Active profiles = whatever the (reused) Q1 analysis actually ran.
-        # Falls back to the full set for a cold rebalance with no prior results.
+        # Active profiles + agents = whatever the (reused) Q1 analysis actually
+        # ran, so Q2+ re-analysis matches. Falls back to the full sets for a cold
+        # rebalance with no prior results.
+        active_agents = None
         if initial_results:
             first           = next(iter(initial_results.values()))
             active_profiles = list(first["debate_results"].keys())
+            first_dr        = next(iter(first["debate_results"].values()))
+            active_agents   = [r["agent"] for r in first_dr["debate_log"][0]["results"]]
         else:
             active_profiles = list(PROFILES)
         weight_schedule = {p: [] for p in active_profiles}
@@ -147,7 +151,7 @@ class RebalanceEngine:
             else:
                 all_results, portfolios = self._run_quarter_analysis(
                     stock_codes, corp_infos, q_start, q_num=q_num,
-                    profiles=active_profiles,
+                    profiles=active_profiles, agents=active_agents,
                 )
 
             # Quarter-start weights → schedule
@@ -191,6 +195,7 @@ class RebalanceEngine:
         as_of_date: datetime,
         q_num: int = 1,
         profiles=None,
+        agents=None,
     ) -> Tuple[dict, dict]:
         """Run full 5-agent debate for every stock; return (all_results, portfolios).
 
@@ -215,7 +220,7 @@ class RebalanceEngine:
 
             result = self.orchestrator.analyze_stock(
                 code, as_of_date, corp_infos[code],
-                stage=stage, output_dir=output_dir, profiles=profiles,
+                stage=stage, output_dir=output_dir, profiles=profiles, agents=agents,
             )
             all_results[code] = result
 

@@ -1008,33 +1008,38 @@ function _ensureProfileSection(ticker, profile) {
   const agentsDiv = document.createElement("div");
   agentsDiv.className = "tgrid-agents";
 
-  const agentEls = {};
-  AGENTS.forEach((ag) => {
-    const row = document.createElement("div");
-    row.className = "tgrid-row";
-
-    const nameEl = document.createElement("span");
-    nameEl.className = "tgrid-name";
-    nameEl.textContent = ag;
-
-    const colonEl = document.createElement("span");
-    colonEl.className = "tgrid-colon";
-    colonEl.textContent = ":";
-
-    const statusEl = document.createElement("span");
-    statusEl.className = "tgrid-status dim";
-    statusEl.innerHTML = `<span class="spinner"></span> analyzing…`;
-
-    row.appendChild(nameEl);
-    row.appendChild(colonEl);
-    row.appendChild(statusEl);
-    agentsDiv.appendChild(row);
-    agentEls[ag] = statusEl;
-  });
-
+  // Agent rows are added lazily as each agent reports, so a 1/3-agent run shows
+  // only the agents that actually debated (see _ensureAgentRow).
   wrap.appendChild(agentsDiv);
-  state[profile] = { hdr, agents: agentEls };
+  state[profile] = { hdr, agentsDiv, agents: {} };
   return state[profile];
+}
+
+// Build one agent row on first use within a profile section.
+function _ensureAgentRow(section, agent) {
+  if (section.agents[agent]) return section.agents[agent];
+
+  const row = document.createElement("div");
+  row.className = "tgrid-row";
+
+  const nameEl = document.createElement("span");
+  nameEl.className = "tgrid-name";
+  nameEl.textContent = agent;
+
+  const colonEl = document.createElement("span");
+  colonEl.className = "tgrid-colon";
+  colonEl.textContent = ":";
+
+  const statusEl = document.createElement("span");
+  statusEl.className = "tgrid-status dim";
+  statusEl.innerHTML = `<span class="spinner"></span> analyzing…`;
+
+  row.appendChild(nameEl);
+  row.appendChild(colonEl);
+  row.appendChild(statusEl);
+  section.agentsDiv.appendChild(row);
+  section.agents[agent] = statusEl;
+  return statusEl;
 }
 
 function appendDebateCards(ticker, name) {
@@ -1065,7 +1070,7 @@ function updateAgentCard(agent, status, signal, round, profile) {
   const label = _profileDef(profile).label;
   section.hdr.textContent = _hdrText(label, round);
 
-  const statusEl = section.agents[agent];
+  const statusEl = _ensureAgentRow(section, agent);
   if (!statusEl) return;
 
   const s = (signal || "").toUpperCase();

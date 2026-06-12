@@ -45,7 +45,15 @@ The graph is a map, not the territory — still read the real code for the lines
 
 ## Architecture in one breath
 
-`OrchestratorAgent` is the hub: per stock → 5 analysis agents (fundamental, macro, market,
+`OrchestratorAgent` is the hub: per stock → analysis agents (fundamental, macro, market,
 sentiment, technical — all extend `BaseAgent`) → `DebateManager` (round-robin + majority vote)
 → Portfolio → Backtest → Report. `calibration/` injects each agent's past signal accuracy into the debate.
 See `README.md` for the full file tree.
+
+**Risk profiles and agents are user-selectable per run** (`ALL_PROFILES` / `ALL_AGENTS` in `config.py`).
+The selection is threaded only at the entry edge (`analyze_stock(profiles=…, agents=…)`); everything
+downstream **derives the active set from the data** (`portfolios.keys()`, the agents in a debate's
+results) rather than from a constant — so single-profile / fewer-agent runs need no extra plumbing.
+Agent count is **forced odd (1/3/5)** at the picker so the BUY/SELL majority vote can't tie, and
+`compute_conviction` re-normalises `AGENT_WEIGHTS` over whatever agents actually ran. When editing the
+debate, keep `DebateManager` registry/loop-driven — don't re-hardcode the five agents.

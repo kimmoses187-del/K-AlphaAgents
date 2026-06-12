@@ -38,6 +38,26 @@ def profile_short(profile: str) -> str:
     """Two-letter column tag, e.g. 'risk-averse' → 'RA'."""
     return PROFILE_SHORT.get(profile, profile.replace("risk-", "")[:2].upper())
 
+# ── Debate agents ─────────────────────────────────────────────────────────────
+# The five analysis agents that debate each stock. A run may use any ODD-sized
+# subset (1/3/5) so the majority vote always resolves without a tie-break.
+# Downstream code derives the active agents from each debate's results — never
+# from this constant — so conviction weighting re-normalises over whatever set ran.
+ALL_AGENTS   = ("FundamentalAgent", "SentimentAgent", "TechnicalAgent",
+                "MarketAgent", "MacroAgent")
+AGENT_LABELS = {
+    "FundamentalAgent": "Fundamental",
+    "SentimentAgent":   "Sentiment",
+    "TechnicalAgent":   "Technical",
+    "MarketAgent":      "Market",
+    "MacroAgent":       "Macro",
+}
+
+
+def agent_label(agent: str) -> str:
+    """Human-facing label, e.g. 'FundamentalAgent' → 'Fundamental'."""
+    return AGENT_LABELS.get(agent, agent.replace("Agent", ""))
+
 # ── Debug mode ────────────────────────────────────────────────────────────────
 # Set DEBUG_MODE=true to skip all LLM calls and return stub responses.
 # Use this to test the data pipeline end-to-end without spending tokens.

@@ -5,6 +5,29 @@ Format: `[YYYY-MM-DD] — Summary`
 
 ---
 
+## [2026-06-12] — Selectable Debate Agents (odd count)
+
+**What:** The user now chooses which of the five analysis agents (Fundamental / Sentiment / Technical / Market / Macro) debate each stock. The picker enforces an **odd count (1, 3, or 5)** so the binary BUY/SELL majority vote always has a strict majority — an even pick is rejected with a prompt to re-choose. Default remains all five.
+
+**Why:** Not every stock needs all five lenses, and running fewer agents cuts LLM debate cost proportionally. Odd-only keeps the vote unambiguous without relying on the SELL-default tie-break.
+
+**How — design:** Same derive-from-data approach as selectable profiles. The selection is threaded only at the entry edge (`analyze_stock(agents=…) → _run_debates → DebateManager`); everything downstream reads the agent set from each debate's results. Conviction weighting re-normalises over the agents that actually ran, so a 3-agent unanimous vote still scores 1.0 (the full set sums to 1.0 → unchanged; a subset sums to <1.0 → scaled up).
+
+**How — changes:**
+- `config.py` — `ALL_AGENTS` + `AGENT_LABELS` / `agent_label` helper.
+- `debate/debate_manager.py` — refactored the five hard-wired agent calls into a registry-driven loop (`_AGENT_REGISTRY`: name → class + data-key); `DebateManager(agents=…)` runs only the selected set, in canonical order.
+- `portfolio/portfolio_agent.py` — `compute_conviction` re-normalises `AGENT_WEIGHTS` over the agents present in the result.
+- `orchestrator/orchestrator_agent.py` — `analyze_stock` / `_run_debates` accept `agents`, passed to `DebateManager` and `DebateGrid`.
+- `main.py` / `web/runner.py` — agent pickers with odd-count validation (re-ask on even).
+- `debate/terminal_display.py` — `DebateGrid(agents=…)` renders only selected agent rows; `templates/ui.html` builds agent rows lazily.
+- `rebalance/rebalance_engine.py` — derives the agent set from prior results and threads it into Q2+ re-analysis.
+
+**Impact:** Fewer agents → proportionally lower debate cost. Default (all five) is unchanged. Verified via `DEBUG_MODE=true` runs (3-agent single-profile through backtest/PDF/XLSX/DOCX; 5-agent both-profile regression) and unit tests for conviction re-normalisation and the odd-count guard.
+
+**Known limitation:** Data fetch still pulls all five data blobs even when fewer agents are selected (the saving is in the LLM debate calls, not the data APIs). De-selected agents' data fetch could be skipped later, but the sources are partly shared (pykrx prices feed technical + market + sentiment).
+
+---
+
 ## [2026-06-11] — Selectable Risk Profiles
 
 **What:** The user now chooses which risk profile(s) to analyse at the start of a New Analysis — **Risk-Averse only**, **Risk-Neutral only**, or **Both** (default). A single-profile run produces one debate per stock, one portfolio, one backtest, and a single-column PDF / XLSX / DOCX. Previously every run always computed both profiles side by side.

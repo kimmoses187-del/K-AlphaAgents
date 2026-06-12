@@ -73,9 +73,9 @@ class OrchestratorAgent:
                       corp_info: dict, stage: str = "initial",
                       progress_cb=None, output_dir: Optional[str] = None,
                       calibration_context: dict = None,
-                      profiles=None) -> dict:
+                      profiles=None, agents=None) -> dict:
         """
-        Fetch data and run the 5-agent debate for one stock.
+        Fetch data and run the agent debate for one stock.
         Saves per-profile markdown reports.
         Returns a result dict to be stored by the caller.
 
@@ -86,6 +86,8 @@ class OrchestratorAgent:
         profiles   : which risk profiles to run (subset of ALL_PROFILES).
                      Defaults to all profiles; a single-element tuple yields a
                      single-profile analysis.
+        agents     : which analysis agents debate (odd-sized subset of
+                     ALL_AGENTS). Defaults to all five.
         """
         profiles     = tuple(profiles) if profiles else ALL_PROFILES
         company_name = corp_info["corp_name"]
@@ -102,7 +104,7 @@ class OrchestratorAgent:
         debate_results = self._run_debates(company_name, data,
                                            progress_cb=progress_cb,
                                            calibration_context=calibration_context,
-                                           profiles=profiles)
+                                           profiles=profiles, agents=agents)
 
         # ── Output paths ──────────────────────────────────────────────────────
         # Structure: reports/signals/{ticker}_{name}/{as_of_date}/
@@ -471,7 +473,7 @@ class OrchestratorAgent:
 
     def _run_debates(self, company_name: str, data: dict,
                      progress_cb=None, calibration_context: dict = None,
-                     profiles=None) -> dict:
+                     profiles=None, agents=None) -> dict:
         from debate.terminal_display import DebateGrid
 
         profiles = tuple(profiles) if profiles else ALL_PROFILES
@@ -481,11 +483,11 @@ class OrchestratorAgent:
         # Build the shared in-place grid (terminal only; skipped if web callback active)
         grid = None
         if not progress_cb:
-            grid = DebateGrid(profiles)
+            grid = DebateGrid(profiles, agents)
             grid.init()
 
         def _debate(profile: str) -> tuple:
-            manager = DebateManager(risk_profile=profile)
+            manager = DebateManager(risk_profile=profile, agents=agents)
             result  = manager.run(
                 company_name=company_name,
                 fundamental_data=data["fundamental_data"],

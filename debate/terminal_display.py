@@ -65,12 +65,15 @@ _SEP = "─" * 44
 class DebateGrid:
     """Thread-safe in-place terminal grid for the debate display (1 or 2 profiles)."""
 
-    def __init__(self, profiles=None):
+    def __init__(self, profiles=None, agents=None):
         self._lock       = threading.Lock()
         self._row_map    = {}   # (profile, agent) -> row index from top of grid
         self._hdr_row    = {}   # profile -> row index of its header line
         self._bottom     = 0    # rows below row 0 where cursor currently sits
         self._profiles   = tuple(profiles) if profiles else _PROFILES
+        # Keep canonical order; default to all agents.
+        chosen = list(agents) if agents else list(_AGENTS)
+        self._agents     = [a for a in _AGENTS if a in chosen]
 
     # ── Public API ────────────────────────────────────────────────────────────
 
@@ -83,7 +86,7 @@ class DebateGrid:
             label = _LABELS.get(profile, profile.upper())
             rows.append(f"  {_B}── {label}  Round 0 {_SEP[:max(0,44-len(label)-9)]}{_RST}")
             self._hdr_row[profile] = len(rows) - 1
-            for agent in _AGENTS:
+            for agent in self._agents:
                 rows.append(f"      {agent:<20}: {_DIM}● analyzing…{_RST}")
                 self._row_map[(profile, agent)] = len(rows) - 1
             rows.append("")   # blank separator
